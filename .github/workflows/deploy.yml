@@ -134,17 +134,11 @@ jobs:
 
         cd "$NEW_RELEASE_PATH"
         export PATH="$HOME/.npm-global/bin:$PATH"
-        if ! command -v pnpm >/dev/null 2>&1; then
-          npm install -g pnpm@latest --prefix "$HOME/.npm-global"
+        if ! command -v pnpm >/dev/null 2>&1 || ! pnpm --version | grep -q '^10\.'; then
+          npm install -g pnpm@10.28.2 --prefix "$HOME/.npm-global"
         fi
         rm -rf node_modules .next
-        set +e
         pnpm install --frozen-lockfile
-        INSTALL_RC=$?
-        set -e
-        if [ "$INSTALL_RC" -ne 0 ] && [ ! -d node_modules/.pnpm ]; then
-          rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
-        fi
         pnpm rebuild sharp 2>/dev/null || true
         if ! pnpm run build; then
           rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
