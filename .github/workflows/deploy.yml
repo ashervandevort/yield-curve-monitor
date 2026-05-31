@@ -138,9 +138,8 @@ jobs:
           npm install -g pnpm@latest --prefix "$HOME/.npm-global"
         fi
         rm -rf node_modules .next
-        pnpm approve-builds sharp unrs-resolver core-js 2>/dev/null || true
-        pnpm install --frozen-lockfile || pnpm install --frozen-lockfile
-        if [ ! -d node_modules ]; then
+        pnpm install --frozen-lockfile
+        if [ ! -d node_modules/.pnpm ]; then
           rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
         fi
         if ! pnpm run build; then
