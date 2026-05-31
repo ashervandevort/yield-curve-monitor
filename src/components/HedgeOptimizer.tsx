@@ -62,27 +62,38 @@ function KrdMiniChart({
   const tenors = ['2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y']
   const values = tenors.map((t) => exposures[t] ?? 0)
   const max = Math.max(...values, 1)
-  const w = 120, h = 36, barW = 14, gap = 3
+  const w = 148, h = 56, barW = 16, gap = 5
 
   return (
-    <svg width={w} height={h} className="mt-1">
+    <svg width={w} height={h} className="mt-1.5">
       {tenors.map((t, i) => {
         const v = values[i]
-        const bh = Math.max(2, (v / max) * (h - 10))
+        const bh = Math.max(2, (v / max) * (h - 14))
         const x = i * (barW + gap)
-        const y = h - 8 - bh
+        const y = h - 12 - bh
         return (
           <g key={t}>
             <rect
               x={x} y={y} width={barW} height={bh}
               rx={1}
               fill={v > 0 ? '#ff6600' : 'rgba(255,255,255,0.1)'}
-              opacity={v > 0 ? 0.8 : 0.4}
+              opacity={v > 0 ? 0.85 : 0.3}
             />
+            {v > 0 && (
+              <text
+                x={x + barW / 2} y={y - 2}
+                textAnchor="middle"
+                fontSize="6.5"
+                fill="rgba(255,153,0,0.7)"
+                fontFamily="JetBrains Mono, monospace"
+              >
+                {v}
+              </text>
+            )}
             <text
               x={x + barW / 2} y={h - 1}
               textAnchor="middle"
-              fontSize="6"
+              fontSize="7"
               fill="rgba(255,255,255,0.3)"
               fontFamily="JetBrains Mono, monospace"
             >
@@ -91,7 +102,7 @@ function KrdMiniChart({
           </g>
         )
       })}
-      <text x={w - 2} y={8} textAnchor="end" fontSize="7" fill="rgba(255,255,255,0.2)" fontFamily="JetBrains Mono, monospace">
+      <text x={w - 2} y={9} textAnchor="end" fontSize="7" fill="rgba(255,255,255,0.2)" fontFamily="JetBrains Mono, monospace">
         ${dv01Total}/bp
       </text>
     </svg>
@@ -157,6 +168,14 @@ function fmt$(v: number): string {
   if (abs >= 1_000_000) return `${sign}$${(v / 1_000_000).toFixed(2)}M`
   if (abs >= 1_000)     return `${sign}$${(v / 1_000).toFixed(1)}k`
   return `${sign}$${v.toFixed(0)}`
+}
+
+function fmtNotional(v: number): string {
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
+  if (abs >= 1_000_000)     return `$${(v / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000)         return `$${(v / 1_000).toFixed(0)}k`
+  return `$${v.toFixed(0)}`
 }
 
 function signColor(v: number): string {
@@ -671,7 +690,7 @@ export default function HedgeOptimizer() {
                     unit={unit}
                     notional={refNotional}
                     width={520}
-                    height={175}
+                    height={220}
                     activeTenor={activeTenor}
                     onTenorHover={setActiveTenor}
                   />
@@ -690,7 +709,7 @@ export default function HedgeOptimizer() {
                       <th>Target</th>
                       <th>Achieved</th>
                       <th>Residual</th>
-                      <th>Net</th>
+                      <th>Cov%</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -698,7 +717,7 @@ export default function HedgeOptimizer() {
                       const tgt = result.target_dv01[tenor] ?? 0
                       const ach = result.achieved_dv01[tenor] ?? 0
                       const res = result.residual[tenor] ?? 0
-                      const net = tgt + ach  // target + hedge contracts = net book
+                      const covPct = tgt !== 0 ? Math.min(999, Math.round((ach / tgt) * 100)) : null
                       const isActive = activeTenor === tenor
                       const cv = (v: number) => convertUnit(v, unit, refNotional, tenor as KeyRateTenor)
                       return (
@@ -715,77 +734,122 @@ export default function HedgeOptimizer() {
                             {formatUnit(cv(res), unit)}
                           </td>
                           <td>
-                            <span
-                              className="font-semibold"
-                              style={{ color: signColor(net) }}
-                            >
-                              {formatUnit(cv(net), unit)}
-                            </span>
+                            {covPct !== null ? (
+                              <span
+                                className="font-semibold"
+                                style={{ color: covPct >= 90 ? '#00cc66' : covPct >= 70 ? '#ff9900' : '#ff3333' }}
+                              >
+                                {covPct}%
+                              </span>
+                            ) : (
+                              <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>
+                            )}
                           </td>
                         </tr>
                       )
                     })}
                   </tbody>
                 </table>
-                {/* Net summary row */}
+                {/* Net residual summary pills */}
                 <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/[0.06] flex-wrap">
-                  <span className="stat-label mr-1">NET BOOK:</span>
+                  <span className="stat-label mr-1">RESIDUAL:</span>
                   {KEY_RATE_TENORS.map((tenor) => {
-                    const net = (result.target_dv01[tenor] ?? 0) + (result.achieved_dv01[tenor] ?? 0)
-                    if (Math.abs(net) < 0.5) return null
+                    const res = result.residual[tenor] ?? 0
+                    if (Math.abs(res) < 0.5) return null
                     return (
                       <div
                         key={tenor}
                         className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-[2px]"
                         style={{
-                          background: net > 0 ? 'rgba(0,204,102,0.1)' : 'rgba(255,51,51,0.1)',
-                          border: `1px solid ${net > 0 ? 'rgba(0,204,102,0.2)' : 'rgba(255,51,51,0.2)'}`,
+                          background: res > 0 ? 'rgba(255,153,0,0.1)' : 'rgba(255,51,51,0.1)',
+                          border: `1px solid ${res > 0 ? 'rgba(255,153,0,0.25)' : 'rgba(255,51,51,0.25)'}`,
                         }}
                       >
                         <span className="font-mono text-[9px]" style={{ color: '#ffcc00' }}>{tenor}</span>
-                        <span className="font-mono text-[9px] font-bold" style={{ color: signColor(net) }}>
-                          {net > 0 ? '+' : ''}{Math.round(net)}
+                        <span className="font-mono text-[9px] font-bold" style={{ color: res > 0 ? '#ff9900' : '#ff3333' }}>
+                          {res > 0 ? '+' : ''}{Math.round(res)}
                         </span>
                       </div>
                     )
                   })}
+                  {KEY_RATE_TENORS.every((t) => Math.abs(result.residual[t] ?? 0) < 0.5) && (
+                    <span className="font-mono text-[9px] font-semibold" style={{ color: '#00cc66' }}>
+                      ✓ Fully hedged
+                    </span>
+                  )}
                 </div>
               </Panel>
 
               {/* ── Contract positions ── */}
               <SectionBlock title="Recommended Positions" id="positions" expanded={expandedSections.has('positions')} onToggle={toggleSection}>
-                <div className="space-y-1">
-                  {result.contracts_detail.map((c) => (
-                    <div key={c.symbol} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
-                      <div>
-                        <span className="tenor-label mr-2">{c.symbol}</span>
-                        <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                          {c.name}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-mono font-bold text-sm" style={{ color: c.contracts > 0 ? '#00cc66' : '#ff3333' }}>
-                          {c.contracts > 0 ? '+' : ''}{c.contracts}
-                        </div>
-                        <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                          {c.direction} · ${c.dv01_per_contract}/bp
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-white/[0.06]">
-                  {[
-                    { label: 'Gross Contracts', value: result.gross_contracts.toLocaleString() },
-                    { label: 'Gross DV01', value: fmt$(result.gross_dv01) },
-                    { label: 'Est. Margin', value: fmt$(result.margin_estimate) },
-                  ].map(({ label, value }) => (
-                    <div key={label}>
-                      <div className="stat-label">{label}</div>
-                      <div className="stat-value mt-0.5 text-sm">{value}</div>
-                    </div>
-                  ))}
-                </div>
+                <table className="table-terminal w-full mb-3">
+                  <thead>
+                    <tr>
+                      <th>Instrument</th>
+                      <th className="text-right">Contracts</th>
+                      <th className="text-right">Notional</th>
+                      <th className="text-right">DV01/ct</th>
+                      <th className="text-right">Total DV01</th>
+                      <th className="text-right">Margin/ct</th>
+                      <th className="text-right">Total Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.contracts_detail.map((c) => (
+                      <tr key={c.symbol}>
+                        <td>
+                          <span className="tenor-label mr-1.5">{c.symbol}</span>
+                          <span className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{c.name}</span>
+                        </td>
+                        <td className="text-right">
+                          <span className="font-mono font-bold text-xs" style={{ color: c.contracts > 0 ? '#00cc66' : '#ff3333' }}>
+                            {c.contracts > 0 ? '+' : ''}{c.contracts}
+                          </span>
+                          <span className="font-mono text-[9px] ml-1" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                            {c.direction}
+                          </span>
+                        </td>
+                        <td className="text-right font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                          {fmtNotional(c.notional_face ?? 0)}
+                        </td>
+                        <td className="text-right font-mono text-[10px]" style={{ color: '#ff9900' }}>
+                          ${c.dv01_per_contract}
+                        </td>
+                        <td className="text-right font-mono text-[10px]" style={{ color: '#ff9900' }}>
+                          {fmt$(c.total_dv01)}
+                        </td>
+                        <td className="text-right font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                          ${(c.margin_per_contract ?? 0).toLocaleString()}
+                        </td>
+                        <td className="text-right font-mono text-[10px] font-semibold" style={{ color: '#00cccc' }}>
+                          {fmt$(c.total_margin ?? 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                      <td colSpan={2} className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                        TOTALS
+                      </td>
+                      <td className="text-right font-mono text-[10px] font-bold" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                        {fmtNotional(result.contracts_detail.reduce((s, c) => s + (c.notional_face ?? 0), 0))}
+                      </td>
+                      <td />
+                      <td className="text-right font-mono text-[10px] font-bold" style={{ color: '#ff9900' }}>
+                        {fmt$(result.gross_dv01)}
+                      </td>
+                      <td />
+                      <td className="text-right font-mono text-[10px] font-bold" style={{ color: '#00cccc' }}>
+                        {fmt$(result.margin_estimate)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <p className="font-mono text-[9px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                  Margin estimates are approximate CME initial margin (SPAN-based; subject to daily change).
+                  Notional = |contracts| × face value per contract.
+                </p>
               </SectionBlock>
 
               {/* ── Rebalancing ── */}

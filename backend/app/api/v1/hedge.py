@@ -122,14 +122,23 @@ async def optimize_hedge(request: HedgeRequest):
     margin = hedging_optimizer.calculate_margin_estimate(result.contracts)
 
     contracts_detail = []
+    # margin schedule (rough CME initial margin; changes daily with SPAN)
+    MARGIN_SCHEDULE = {
+        'ZT': 550, 'ZF': 850, 'ZN': 1_350,
+        'TN': 1_700, 'ZB': 2_800, 'UB': 3_500,
+    }
     for inst, count in result.contracts.items():
         info = hedging_optimizer.get_contract_info(inst)
+        margin_per = MARGIN_SCHEDULE.get(inst, 2_000)
         contracts_detail.append({
             'symbol': inst,
             'name': info.get('name', inst),
             'contracts': count,
             'dv01_per_contract': info.get('dv01_approx', 0),
             'total_dv01': round(count * info.get('dv01_approx', 0), 2),
+            'notional_face': abs(count) * info.get('contract_size', 100_000),
+            'margin_per_contract': margin_per,
+            'total_margin': abs(count) * margin_per,
             'key_rate_exposures': {
                 tenor: round(count * exp, 2)
                 for tenor, exp in info.get('exposures', {}).items()

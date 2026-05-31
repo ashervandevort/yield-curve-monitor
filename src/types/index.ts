@@ -160,6 +160,9 @@ export interface ContractDetail {
   contracts: number
   dv01_per_contract: number
   total_dv01: number
+  notional_face: number
+  margin_per_contract: number
+  total_margin: number
   key_rate_exposures: Record<string, number>
   direction: 'LONG' | 'SHORT'
 }

@@ -61,6 +61,16 @@ export default function ScenarioPanel({ scenarios }: ScenarioPanelProps) {
 
   return (
     <div className="space-y-0.5">
+      {/* Explanation note */}
+      <div className="px-2 py-2 mb-1 rounded-[2px] bg-white/[0.02] border border-white/[0.05]">
+        <p className="font-mono text-[9px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Pre-Hedge</span> = P&amp;L on your target position alone.{'  '}
+          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Hedge</span> = P&amp;L from the futures contracts.{'  '}
+          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Net</span> = combined (residual exposure).
+          All values in USD. Formula: P&amp;L = −DV01 × Δrates (bp).
+        </p>
+      </div>
+
       {/* Header row */}
       <div className="grid grid-cols-5 gap-1 px-2 py-1.5">
         <div className="col-span-2 stat-label text-[9px]">SCENARIO</div>
