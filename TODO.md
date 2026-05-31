@@ -21,7 +21,9 @@
 | 3050 | Next.js | rainbow-rachel |
 | 3051 | Next.js | compute-futures |
 | 3052 | Next.js | market-color (color.252.capital) |
-| **3053** | **Next.js** | **yield-curve (yield.252.capital)** |
+| 3053 | holo | holo.252.capital |
+| **3054** | **yield-curve** | **yield.252.capital** |
+| 3011–3013 | simple-timesheet | (3 apps) |
 | **8053** | **FastAPI** | **yield-curve-api (localhost only)** |
 
 Override locally via `PORT` env var (see README).

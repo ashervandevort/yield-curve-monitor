@@ -80,9 +80,9 @@ Open [http://localhost:3053](http://localhost:3053).
 | rainbow-rachel | 3050 | — |
 | compute-futures | 3051 | — |
 | market-color | 3052 | — |
-| **yield-curve** | **3053** | **8053** |
+| **yield-curve** | **3054** | **8053** |
 
-3053 / 8053 are reserved for this app and do not overlap other 252 projects.
+3054 / 8053 are used in production. Port 3053 is **holo** — do not use. Simple-timesheet uses 3011–3013.
 
 ---
 
@@ -157,7 +157,7 @@ These are **not** your Hostinger hPanel login. They are for GitHub Actions to SS
 3. **SSL** — `sudo certbot --expand --nginx -d yield.252.capital`
 4. **Deploy** — Push to `main` or run workflow manually
 
-PM2 processes: `yield-curve` (:3053), `yield-curve-api` (:8053). Backend is localhost-only; Nginx serves the frontend.
+PM2 processes: `yield-curve` (:3054), `yield-curve-api` (:8053). Backend is localhost-only; Nginx serves the frontend.
 
 ### Verify
 
