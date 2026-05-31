@@ -1,6 +1,5 @@
 'use client'
 
-import { motion } from 'framer-motion'
 import { SpreadsData } from '@/types'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
@@ -9,71 +8,74 @@ interface SpreadsPanelProps {
   loading?: boolean
 }
 
-const SPREAD_CONFIG: Record<string, { label: string; description: string; importance: 'primary' | 'secondary' | 'tertiary' }> = {
-  '2s10s':    { label: '2s10s',    description: '10Y − 2Y',          importance: 'primary' },
-  '5s30s':    { label: '5s30s',    description: '30Y − 5Y',          importance: 'secondary' },
-  '3m10y':    { label: '3m10y',    description: '10Y − 3M',          importance: 'primary' },
-  '2s30s':    { label: '2s30s',    description: '30Y − 2Y',          importance: 'secondary' },
-  '2s5s':     { label: '2s5s',     description: '5Y − 2Y',           importance: 'tertiary' },
-  '5s10s30s': { label: '5s10s30s', description: '(5Y+30Y)/2 − 10Y',  importance: 'tertiary' },
-  '2s5s10s':  { label: '2s5s10s',  description: '(2Y+10Y)/2 − 5Y',   importance: 'tertiary' },
+const SPREAD_CONFIG: Record<
+  string,
+  {
+    label: string
+    formula: string
+    note: string
+    importance: 'primary' | 'secondary' | 'tertiary'
+  }
+> = {
+  '2s10s':    { label: '2s10s',    formula: '10Y − 2Y',           note: 'Recession / cycle signal',     importance: 'primary' },
+  '3m10y':    { label: '3m10y',    formula: '10Y − 3M',           note: 'Fed policy vs long end',       importance: 'primary' },
+  '5s30s':    { label: '5s30s',    formula: '30Y − 5Y',           note: 'Long-end term premium',        importance: 'secondary' },
+  '2s30s':    { label: '2s30s',    formula: '30Y − 2Y',           note: 'Full curve slope',             importance: 'secondary' },
+  '2s5s':     { label: '2s5s',     formula: '5Y − 2Y',            note: 'Front-end steepness',          importance: 'tertiary' },
+  '5s10s30s': { label: '5s10s30s', formula: '(5Y+30Y)/2 − 10Y',   note: 'Belly butterfly',            importance: 'tertiary' },
+  '2s5s10s':  { label: '2s5s10s',  formula: '(2Y+10Y)/2 − 5Y',    note: 'Front butterfly',              importance: 'tertiary' },
 }
 
-function SpreadCard({
+const ORDER = ['2s10s', '3m10y', '5s30s', '2s30s', '2s5s', '5s10s30s', '2s5s10s']
+
+function regimeLabel(interpretation: string): { text: string; color: string; Icon: typeof TrendingUp } {
+  if (interpretation === 'inverted') return { text: 'Inv', color: '#ff3333', Icon: TrendingDown }
+  if (interpretation === 'steepening') return { text: 'Steep', color: '#00cc66', Icon: TrendingUp }
+  return { text: 'Norm', color: 'rgba(255,255,255,0.35)', Icon: Minus }
+}
+
+function SpreadRow({
   spread,
   config,
-  index,
 }: {
   spread: { value: number; interpretation: string } | undefined
-  config: { label: string; description: string; importance: 'primary' | 'secondary' | 'tertiary' }
-  index: number
+  config: (typeof SPREAD_CONFIG)[string]
 }) {
   if (!spread) return null
-
-  const isInverted = spread.interpretation === 'inverted'
-  const isSteepening = spread.interpretation === 'steepening'
-  const isNormal = spread.interpretation === 'normal'
-
-  const Icon = isInverted ? TrendingDown : isSteepening ? TrendingUp : Minus
+  const { text, color, Icon } = regimeLabel(spread.interpretation)
+  const isPrimary = config.importance === 'primary'
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05, duration: 0.2 }}
-      className={`
-        panel p-3
-        ${config.importance === 'primary' ? 'border-l-2 border-l-orange-500' : ''}
-        ${config.importance === 'secondary' ? 'border-l-2 border-l-cyan-500/50' : ''}
-      `}
+    <div
+      className={`flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0 ${
+        isPrimary ? 'border-l-2 border-l-bloomberg-orange/60 pl-2' : 'pl-0.5'
+      }`}
     >
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="tenor-label">{config.label}</span>
-            <span className="text-xs text-gray-600">{config.description}</span>
-          </div>
-          <div className={`
-            text-2xl font-mono font-bold mt-1
-            ${spread.value > 0 ? 'text-green-400' : spread.value < 0 ? 'text-red-400' : 'text-gray-400'}
-          `}>
-            {spread.value > 0 ? '+' : ''}{spread.value.toFixed(1)}
-            <span className="text-sm text-gray-500 ml-1">bp</span>
-          </div>
-        </div>
-        <div className={`
-          flex items-center gap-1 px-2 py-1 rounded text-xs font-mono
-          ${isInverted ? 'bg-red-500/10 text-red-400' : ''}
-          ${isSteepening ? 'bg-green-500/10 text-green-400' : ''}
-          ${isNormal ? 'bg-gray-500/10 text-gray-400' : ''}
-        `}>
-          <Icon className="w-3 h-3" />
-          <span className="uppercase">
-            {isInverted ? 'Inverted' : isSteepening ? 'Steep' : 'Normal'}
+      <div className="min-w-0 flex-1 pr-2">
+        <div className="flex items-center gap-1.5">
+          <span className="tenor-label text-[10px]">{config.label}</span>
+          <span className="font-mono text-[8px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            {config.formula}
           </span>
         </div>
+        <div className="font-mono text-[8px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.2)' }}>
+          {config.note}
+        </div>
       </div>
-    </motion.div>
+      <div className="text-right shrink-0">
+        <div
+          className="font-mono font-bold text-sm leading-none"
+          style={{ color: spread.value > 0 ? '#00cc66' : spread.value < 0 ? '#ff3333' : 'rgba(255,255,255,0.4)' }}
+        >
+          {spread.value > 0 ? '+' : ''}{spread.value.toFixed(1)}
+          <span className="text-[9px] font-normal ml-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>bp</span>
+        </div>
+        <div className="flex items-center justify-end gap-0.5 mt-0.5">
+          <Icon className="w-2.5 h-2.5" style={{ color }} />
+          <span className="font-mono text-[8px] uppercase" style={{ color }}>{text}</span>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -81,11 +83,8 @@ export default function SpreadsPanel({ data, loading }: SpreadsPanelProps) {
   if (loading) {
     return (
       <div className="space-y-2">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="panel p-3">
-            <div className="skeleton h-4 w-20 rounded mb-2" />
-            <div className="skeleton h-8 w-24 rounded" />
-          </div>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="skeleton h-8 rounded" />
         ))}
       </div>
     )
@@ -93,51 +92,49 @@ export default function SpreadsPanel({ data, loading }: SpreadsPanelProps) {
 
   if (!data) {
     return (
-      <div className="panel p-4 text-center text-gray-500">
-        <span className="font-mono text-sm">No spread data available</span>
+      <div className="py-4 text-center">
+        <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>
+          No spread data available
+        </span>
       </div>
     )
   }
 
-  const spreadsEntries = Object.entries(SPREAD_CONFIG)
+  const hasInversion = Object.values(data.spreads).some((s) => s?.interpretation === 'inverted')
 
   return (
-    <div className="space-y-2">
-      {/* Header */}
-      <div className="flex items-center justify-between px-1 mb-3">
-        <span className="label-orange">KEY SPREADS</span>
-        <span className="text-xs text-gray-500 font-mono">
-          As of {data.date}
+    <div>
+      {/* Context — no duplicate panel title; parent header owns "Key Spreads" */}
+      <p className="font-mono text-[9px] leading-relaxed mb-2 pb-2 border-b border-white/[0.05]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        Spot closing spreads · latest FRED curve
+        {data.date && (
+          <span style={{ color: 'rgba(255,255,255,0.45)' }}> · as of {data.date}</span>
+        )}
+        <br />
+        <span style={{ color: 'rgba(255,255,255,0.2)' }}>
+          Level today, not a change over time. Values in basis points.
         </span>
+      </p>
+
+      <div>
+        {ORDER.map((key) => (
+          <SpreadRow
+            key={key}
+            spread={data.spreads[key as keyof typeof data.spreads]}
+            config={SPREAD_CONFIG[key]}
+          />
+        ))}
       </div>
 
-      {/* Spread cards */}
-      {spreadsEntries.map(([key, config], index) => (
-        <SpreadCard
-          key={key}
-          spread={data.spreads[key as keyof typeof data.spreads]}
-          config={config}
-          index={index}
-        />
-      ))}
-
-      {/* Inversion warning */}
-      {Object.values(data.spreads).some(s => s?.interpretation === 'inverted') && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="panel p-3 border border-red-500/30 bg-red-500/5"
-        >
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-xs font-mono text-red-400">
-              CURVE INVERSION DETECTED
+      {hasInversion && (
+        <div className="mt-2 p-2 rounded-[2px] border border-red-500/25 bg-red-500/[0.04]">
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="font-mono text-[9px] text-red-400 uppercase tracking-wide">
+              Inversion detected
             </span>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Inverted curves have historically preceded recessions.
-          </p>
-        </motion.div>
+        </div>
       )}
     </div>
   )

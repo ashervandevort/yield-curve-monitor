@@ -28,6 +28,8 @@
     "d3-array": "^3.2.4",
     "d3-time-format": "^4.1.0",
     "framer-motion": "^12.0.0",
+    "jspdf": "^3.0.1",
+    "jspdf-autotable": "^5.0.2",
     "lucide-react": "^0.462.0",
     "next": "^16.0.10",
     "pg": "^8.16.3",

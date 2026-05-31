@@ -68,9 +68,9 @@ function KrdMiniChart({
   return (
     <svg
       viewBox={`0 0 ${vW} ${vH}`}
-      width="100%"
-      style={{ display: 'block', marginTop: '6px' }}
+      className="w-full h-9 mt-1 block"
       preserveAspectRatio="xMidYMid meet"
+      aria-hidden
     >
       {tenors.map((t, i) => {
         const v = values[i]
@@ -114,11 +114,11 @@ function ContractsChart({ contracts }: { contracts: Record<string, number> }) {
     val: contracts[sym] ?? 0,
   }))
   const maxAbs = Math.max(...entries.map((e) => Math.abs(e.val)), 1)
-  const vW = 280, rowH = 22, pad = 28, barArea = vW - pad * 2
-  const vH = ALL_INSTRUMENTS.length * rowH + 8
+  const vW = 240, rowH = 16, pad = 24, barArea = vW - pad * 2
+  const vH = ALL_INSTRUMENTS.length * rowH + 6
 
   return (
-    <svg viewBox={`0 0 ${vW} ${vH}`} width="100%" style={{ display: 'block' }}>
+    <svg viewBox={`0 0 ${vW} ${vH}`} className="w-full max-w-[280px] h-[100px] block" preserveAspectRatio="xMidYMid meet" aria-hidden>
       {/* Zero line */}
       <line x1={pad + barArea / 2} y1={0} x2={pad + barArea / 2} y2={vH}
         stroke="rgba(255,255,255,0.12)" strokeWidth={1} />
@@ -135,8 +135,8 @@ function ContractsChart({ contracts }: { contracts: Record<string, number> }) {
         return (
           <g key={sym}>
             {/* Symbol label */}
-            <text x={pad - 4} y={y + rowH / 2 + 3.5} textAnchor="end"
-              fontSize="9" fontFamily="JetBrains Mono, monospace"
+            <text x={pad - 3} y={y + rowH / 2 + 2.5} textAnchor="end"
+              fontSize="7" fontFamily="JetBrains Mono, monospace"
               fill={val !== 0 ? '#ffcc00' : 'rgba(255,255,255,0.2)'}>
               {sym}
             </text>
@@ -157,15 +157,15 @@ function ContractsChart({ contracts }: { contracts: Record<string, number> }) {
                 x={isLong ? barX + barLen + 3 : barX - 3}
                 y={y + rowH / 2 + 3.5}
                 textAnchor={isLong ? 'start' : 'end'}
-                fontSize="8" fontFamily="JetBrains Mono, monospace"
+                fontSize="6.5" fontFamily="JetBrains Mono, monospace"
                 fill={color} opacity={0.9}>
                 {val > 0 ? '+' : ''}{val}
               </text>
             )}
 
             {val === 0 && (
-              <text x={pad + barArea / 2} y={y + rowH / 2 + 3.5}
-                textAnchor="middle" fontSize="7.5"
+              <text x={pad + barArea / 2} y={y + rowH / 2 + 2.5}
+                textAnchor="middle" fontSize="6"
                 fontFamily="JetBrains Mono, monospace"
                 fill="rgba(255,255,255,0.12)">
                 —
@@ -176,9 +176,9 @@ function ContractsChart({ contracts }: { contracts: Record<string, number> }) {
       })}
 
       {/* Scale labels */}
-      <text x={pad + barArea / 2} y={vH - 1} textAnchor="middle" fontSize="6.5"
-        fill="rgba(255,255,255,0.2)" fontFamily="JetBrains Mono, monospace">
-        SHORT ← 0 → LONG
+      <text x={pad + barArea / 2} y={vH - 0.5} textAnchor="middle" fontSize="5.5"
+        fill="rgba(255,255,255,0.18)" fontFamily="JetBrains Mono, monospace">
+        short ← 0 → long
       </text>
     </svg>
   )
@@ -763,7 +763,7 @@ export default function HedgeOptimizer() {
                   residual={result.residual}
                   unit={unit}
                   notional={refNotional}
-                  height={220}
+                  height={200}
                   activeTenor={activeTenor}
                   onTenorHover={setActiveTenor}
                 />
@@ -855,8 +855,8 @@ export default function HedgeOptimizer() {
               {/* ── Contract positions ── */}
               <SectionBlock title="Recommended Positions" id="positions" expanded={expandedSections.has('positions')} onToggle={toggleSection}>
                 {/* Contracts bar chart */}
-                <div className="mb-3 pb-3 border-b border-white/[0.06]">
-                  <div className="stat-label mb-1.5">CONTRACT ALLOCATION</div>
+                <div className="mb-2 pb-2 border-b border-white/[0.06]">
+                  <div className="stat-label mb-1">CONTRACTS (integer)</div>
                   <ContractsChart contracts={result.contracts} />
                 </div>
                 <table className="table-terminal w-full mb-3">
@@ -864,7 +864,7 @@ export default function HedgeOptimizer() {
                     <tr>
                       <th>Instrument</th>
                       <th className="text-right">Contracts</th>
-                      <th className="text-right">Notional</th>
+                      <th className="text-right">Face</th>
                       <th className="text-right">DV01/ct</th>
                       <th className="text-right">Total DV01</th>
                       <th className="text-right">Margin/ct</th>
@@ -924,8 +924,8 @@ export default function HedgeOptimizer() {
                   </tfoot>
                 </table>
                 <p className="font-mono text-[9px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                  Margin estimates are approximate CME initial margin (SPAN-based; subject to daily change).
-                  Notional = |contracts| × face value per contract.
+                  Face = |contracts| × par face value ($100k or $200k ZT).
+                  Margin = approximate CME initial margin per contract (SPAN-based; changes daily).
                 </p>
               </SectionBlock>
 

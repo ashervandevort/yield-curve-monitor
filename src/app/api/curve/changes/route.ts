@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(url, {
       headers: { 'Content-Type': 'application/json' },
-      next: { revalidate: 300 },  // Cache for 5 minutes
+      cache: 'no-store',
     })
 
     const data = await response.json()

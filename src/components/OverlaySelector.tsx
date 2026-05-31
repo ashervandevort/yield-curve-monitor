@@ -25,8 +25,8 @@ export default function OverlaySelector({ selected, onChange }: OverlaySelectorP
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-500 font-mono">COMPARE:</span>
+    <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1.5 sm:gap-2">
+      <span className="text-xs text-gray-500 font-mono w-full sm:w-auto text-center sm:text-left">COMPARE:</span>
       {OVERLAYS.map(overlay => (
         <button
           key={overlay.id}

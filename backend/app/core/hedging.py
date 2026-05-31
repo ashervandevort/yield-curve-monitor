@@ -238,12 +238,12 @@ class HedgingOptimizer:
     def calculate_margin_estimate(self, contracts: dict[str, int]) -> float:
         """Rough initial-margin estimate. Actual margin is SPAN-based."""
         margin_per_contract = {
-            'ZT': 700,
-            'ZF': 1_000,
-            'ZN': 1_700,
-            'TN': 2_200,
-            'ZB': 3_400,
-            'UB': 4_500,
+            'ZT': 550,
+            'ZF': 850,
+            'ZN': 1_350,
+            'TN': 1_700,
+            'ZB': 2_800,
+            'UB': 3_500,
         }
         return sum(abs(count) * margin_per_contract.get(inst, 2_000)
                    for inst, count in contracts.items())

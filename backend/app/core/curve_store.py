@@ -148,5 +148,19 @@ class CurveStore:
         pivot.index = pd.to_datetime(pivot.index)
         return pivot.sort_index()
 
+    def row_count(self) -> int:
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM daily_curves").fetchone()[0])
 
-curve_store = CurveStore()
+
+def get_curve_store() -> CurveStore | "PostgresCurveStore":
+    """Return the configured curve persistence backend."""
+    from .config import settings
+
+    if settings.CURVE_STORE_BACKEND.lower() == "postgres":
+        from .pg_curve_store import PostgresCurveStore
+        return PostgresCurveStore()
+    return CurveStore()
+
+
+curve_store = get_curve_store()

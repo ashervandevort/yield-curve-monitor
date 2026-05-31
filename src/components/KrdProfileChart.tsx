@@ -32,7 +32,7 @@ export default function KrdProfileChart({
   residual,
   unit = 'krd',
   notional = 0,
-  height = 240,
+  height = 200,
   activeTenor,
   onTenorHover,
 }: KrdProfileChartProps) {

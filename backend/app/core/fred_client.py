@@ -17,6 +17,27 @@ class FredClient:
         self.base_url = settings.FRED_BASE_URL
         self.series_map = settings.FRED_SERIES
 
+    def _history_cache_usable(
+        self,
+        cached: pd.DataFrame,
+        tenors: list[str],
+        start_date: str,
+    ) -> bool:
+        """Only reuse cache when it spans the range with complete multi-tenor rows."""
+        if cached.empty or not all(tenor in cached.columns for tenor in tenors):
+            return False
+
+        complete = cached[tenors].dropna(how='any')
+        if len(complete) < 2:
+            return False
+
+        start_ts = pd.Timestamp(start_date)
+        # Reject sparse caches that only cover recent days (breaks 1W/1M/1Y overlays)
+        if complete.index.min() > start_ts + pd.Timedelta(days=14):
+            return False
+
+        return True
+
     def _cache_age_hours(self, fetched_at: Optional[str]) -> Optional[float]:
         if not fetched_at:
             return None
@@ -241,9 +262,9 @@ class FredClient:
             DataFrame with date index and tenor columns
         """
         tenors = tenors or list(self.series_map.keys())
-        
+
         cached = curve_store.curve_history(start_date, end_date, tenors)
-        if not cached.empty and all(tenor in cached.columns for tenor in tenors):
+        if self._history_cache_usable(cached, tenors, start_date):
             return cached
 
         all_data = {}
@@ -287,17 +308,12 @@ class FredClient:
     ) -> dict:
         """
         Calculate yield changes across different time windows.
-        
-        Args:
-            windows: List of time windows ('1D', '1W', '1M', '1Y')
-            tenors: List of tenors to include
-        
-        Returns:
-            Dict mapping window -> tenor -> change (in bp)
+
+        Each tenor is compared independently (handles FRED series that publish
+        on different dates).
         """
         tenors = tenors or list(self.series_map.keys())
-        
-        # Map windows to days
+
         window_days = {
             '1D': 1,
             '1W': 7,
@@ -306,49 +322,75 @@ class FredClient:
             '6M': 180,
             '1Y': 365,
         }
-        
-        # Fetch enough history
-        max_days = max(window_days.get(w, 1) for w in windows) + 10  # Buffer
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=max_days)).strftime('%Y-%m-%d')
-        
-        history = await self.fetch_curve_history(start_date, end_date, tenors)
-        
-        if history.empty:
+
+        latest = await self.get_yield_curve(tenors=tenors)
+        latest_yields = latest['yields']
+        latest_date = pd.Timestamp(latest['date']) if latest.get('date') else None
+
+        if not latest_date or not latest_yields:
             return {}
-        
+
+        max_days = max(window_days.get(w, 1) for w in windows) + 10
+        end_date = latest_date.strftime('%Y-%m-%d')
+        start_date = (latest_date - timedelta(days=max_days)).strftime('%Y-%m-%d')
+        history = await self.fetch_curve_history(start_date, end_date, tenors)
+
         changes = {}
-        latest_date = history.index[-1]
-        latest_yields = history.iloc[-1]
-        
         for window in windows:
             days = window_days.get(window, 1)
             target_date = latest_date - timedelta(days=days)
-            
-            # Find closest available date
-            available_dates = history.index[history.index <= target_date]
-            if len(available_dates) == 0:
-                continue
-            
-            comparison_date = available_dates[-1]
-            comparison_yields = history.loc[comparison_date]
-            
-            # Calculate changes in basis points
-            window_changes = {}
+            window_changes: dict[str, float] = {}
+            comparison_dates: list[pd.Timestamp] = []
+
             for tenor in tenors:
-                if tenor in latest_yields and tenor in comparison_yields:
-                    latest = latest_yields[tenor]
-                    comparison = comparison_yields[tenor]
-                    if pd.notna(latest) and pd.notna(comparison):
-                        change_bp = (latest - comparison) * 100  # Convert to bp
-                        window_changes[tenor] = round(change_bp, 1)
-            
-            changes[window] = {
-                'from_date': comparison_date.strftime('%Y-%m-%d'),
-                'to_date': latest_date.strftime('%Y-%m-%d'),
-                'changes': window_changes
-            }
-        
+                if tenor not in latest_yields:
+                    continue
+
+                comparison_date = None
+                comparison_yield = None
+
+                if not history.empty and tenor in history.columns:
+                    series = history[tenor].dropna()
+                    prior = series[series.index <= target_date]
+                    if not prior.empty:
+                        comparison_date = prior.index[-1]
+                        comparison_yield = float(prior.iloc[-1])
+
+                if comparison_date is None:
+                    # Fallback: pull short history for this tenor from FRED
+                    series_id = self.series_map.get(tenor)
+                    if series_id:
+                        try:
+                            df = await self.fetch_series(
+                                series_id,
+                                start_date,
+                                end_date,
+                            )
+                            if not df.empty:
+                                df = df.set_index('date')['value']
+                                prior = df[df.index <= target_date]
+                                if not prior.empty:
+                                    comparison_date = prior.index[-1]
+                                    comparison_yield = float(prior.iloc[-1])
+                        except Exception as e:
+                            print(f"Error fetching change history for {tenor}: {e}")
+
+                if comparison_date is None or comparison_yield is None:
+                    continue
+
+                window_changes[tenor] = round(
+                    (latest_yields[tenor] - comparison_yield) * 100, 1
+                )
+                comparison_dates.append(comparison_date)
+
+            if window_changes:
+                from_date = min(comparison_dates).strftime('%Y-%m-%d') if comparison_dates else target_date.strftime('%Y-%m-%d')
+                changes[window] = {
+                    'from_date': from_date,
+                    'to_date': latest_date.strftime('%Y-%m-%d'),
+                    'changes': window_changes,
+                }
+
         return changes
 
 

@@ -11,6 +11,7 @@ import {
   OverlaySelector,
   StatusBar,
   CurveRegime,
+  ExportPdfButton,
 } from '@/components'
 import {
   CurveType,
@@ -115,6 +116,16 @@ export default function Home() {
       })
   }, [latestCurve, changesData, selectedOverlays, curveType])
 
+  const pdfPayload = useMemo(() => {
+    if (!latestCurve || !spreadsData || !changesData) return null
+    return {
+      curve: latestCurve,
+      spreads: spreadsData,
+      changes: changesData,
+      curveType,
+    }
+  }, [latestCurve, spreadsData, changesData, curveType])
+
   return (
     <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: '#07090c' }}>
       {/* ── Status bar ── */}
@@ -130,9 +141,9 @@ export default function Home() {
       <div className="flex-1 p-2 sm:p-3 min-h-0">
 
         {/* Tab nav + curve toggle */}
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex flex-col items-center sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div
-            className="flex items-center gap-0.5 p-0.5 rounded-[2px]"
+            className="flex items-center justify-center gap-0.5 p-0.5 rounded-[2px] w-full sm:w-auto"
             style={{ background: '#0f1318', border: '1px solid rgba(255,255,255,0.07)' }}
           >
             {(['monitor', 'hedge'] as const).map((tab) => (
@@ -150,7 +161,9 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <CurveToggle value={curveType} onChange={setCurveType} />
+          <div className="flex justify-center w-full sm:w-auto">
+            <CurveToggle value={curveType} onChange={setCurveType} />
+          </div>
         </div>
 
         {/* ── Tab content ── */}
@@ -171,9 +184,12 @@ export default function Home() {
 
                   {/* Yield curve */}
                   <div className="panel">
-                    <div className="panel-header">
+                    <div className="panel-header flex-col sm:flex-row items-center gap-2">
                       <span className="panel-title">Treasury Yield Curve</span>
-                      <OverlaySelector selected={selectedOverlays} onChange={setSelectedOverlays} />
+                      <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
+                        <OverlaySelector selected={selectedOverlays} onChange={setSelectedOverlays} />
+                        <ExportPdfButton payload={pdfPayload} disabled={loading} />
+                      </div>
                     </div>
                     <div className="p-2 overflow-x-auto">
                       {loading && chartData.length === 0 ? (
@@ -235,6 +251,9 @@ export default function Home() {
                   <div className="panel sm:col-span-1">
                     <div className="panel-header">
                       <span className="panel-title">Key Spreads</span>
+                      {spreadsData?.date && (
+                        <span className="panel-subtitle">{spreadsData.date}</span>
+                      )}
                     </div>
                     <div className="panel-body-sm">
                       <SpreadsPanel data={spreadsData} loading={loading && !spreadsData} />
@@ -345,14 +364,25 @@ export default function Home() {
       </div>
 
       {/* ── Footer ── */}
-      <div
-        className="px-4 py-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[9px]"
-        style={{ background: '#0f1318', borderTop: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.2)' }}
+      <footer
+        className="px-4 py-2.5 flex flex-col sm:flex-row flex-wrap items-center justify-center sm:justify-between gap-2 font-mono text-[9px] text-center sm:text-left"
+        style={{ background: '#0f1318', borderTop: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)' }}
       >
         <span>Data: FRED (Federal Reserve Economic Data)</span>
         <span>DV01 values are approximations · Not financial advice</span>
-        <span>Frontend :3053 · Backend :8053</span>
-      </div>
+        <span>
+          Provided by{' '}
+          <a
+            href="https://252.capital"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 hover:text-[#ff6600] transition-colors"
+            style={{ color: 'rgba(255,102,0,0.9)' }}
+          >
+            252.capital
+          </a>
+        </span>
+      </footer>
     </div>
   )
 }

@@ -3,9 +3,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root
-env_path = Path(__file__).parent.parent.parent.parent / '.env'
-load_dotenv(env_path)
+# Load backend/.env first, then optional project-root .env
+_backend_root = Path(__file__).parent.parent.parent
+load_dotenv(_backend_root / '.env')
+load_dotenv(_backend_root.parent / '.env')
 
 
 class Settings:
@@ -15,7 +16,13 @@ class Settings:
     FRED_API_KEY: str = os.getenv('FRED_API_KEY', '')
     FRED_BASE_URL: str = 'https://api.stlouisfed.org/fred'
 
-    # Database – local SQLite cache (PostgreSQL for VPS)
+    # Database – SQLite (local dev) or PostgreSQL (VPS, shared with Market Color)
+    CURVE_STORE_BACKEND: str = os.getenv('CURVE_STORE_BACKEND', 'sqlite')  # sqlite | postgres
+    DB_HOST: str = os.getenv('DB_HOST', 'localhost')
+    DB_PORT: int = int(os.getenv('DB_PORT', '5432'))
+    DB_NAME: str = os.getenv('DB_NAME', 'financial_data_db')
+    DB_USER: str = os.getenv('DB_USER', '')
+    DB_PASSWORD: str = os.getenv('DB_PASSWORD', '')
     DATABASE_URL: str = os.getenv(
         'DATABASE_URL',
         'postgresql://localhost:5432/yield_curve'
@@ -28,7 +35,7 @@ class Settings:
 
     # Server
     HOST: str = os.getenv('HOST', '0.0.0.0')
-    PORT: int = int(os.getenv('PORT', '8053'))  # frontend on 3053
+    PORT: int = int(os.getenv('PORT', '8053'))  # local dev; prod uses 8059 (+5000 from :3059)
 
     # ── Tenor definitions ──────────────────────────────────────────────────────
 
