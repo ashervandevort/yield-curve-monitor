@@ -138,10 +138,14 @@ jobs:
           npm install -g pnpm@latest --prefix "$HOME/.npm-global"
         fi
         rm -rf node_modules .next
+        set +e
         pnpm install --frozen-lockfile
-        if [ ! -d node_modules/.pnpm ]; then
+        INSTALL_RC=$?
+        set -e
+        if [ "$INSTALL_RC" -ne 0 ] && [ ! -d node_modules/.pnpm ]; then
           rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
         fi
+        pnpm rebuild sharp 2>/dev/null || true
         if ! pnpm run build; then
           rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
         fi
