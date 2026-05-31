@@ -1,0 +1,51 @@
+{
+  "name": "yield-curve-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p ${PORT:-3053}",
+    "build": "next build",
+    "start": "next start -p ${PORT:-3053}",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@tailwindcss/postcss": "^4.1.16",
+    "@visx/axis": "^3.12.0",
+    "@visx/curve": "^3.12.0",
+    "@visx/event": "^3.12.0",
+    "@visx/gradient": "^3.12.0",
+    "@visx/grid": "^3.12.0",
+    "@visx/group": "^3.12.0",
+    "@visx/heatmap": "^3.12.0",
+    "@visx/legend": "^3.12.0",
+    "@visx/responsive": "^3.12.0",
+    "@visx/scale": "^3.12.0",
+    "@visx/shape": "^3.12.0",
+    "@visx/tooltip": "^3.12.0",
+    "@visx/voronoi": "^3.12.0",
+    "d3-array": "^3.2.4",
+    "d3-time-format": "^4.1.0",
+    "framer-motion": "^12.0.0",
+    "lucide-react": "^0.462.0",
+    "next": "^16.0.10",
+    "pg": "^8.16.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/d3-array": "^3.2.1",
+    "@types/d3-time-format": "^4.0.3",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.15.5",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "^15.3.3",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.2"
+  }
+}

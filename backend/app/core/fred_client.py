@@ -1,0 +1,356 @@
+"""FRED API client for fetching Treasury yield data."""
+import asyncio
+import httpx
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+import pandas as pd
+
+from .config import settings
+from .curve_store import curve_store
+
+
+class FredClient:
+    """Client for interacting with FRED API."""
+    
+    def __init__(self):
+        self.api_key = settings.FRED_API_KEY
+        self.base_url = settings.FRED_BASE_URL
+        self.series_map = settings.FRED_SERIES
+
+    def _cache_age_hours(self, fetched_at: Optional[str]) -> Optional[float]:
+        if not fetched_at:
+            return None
+        try:
+            fetched = datetime.fromisoformat(fetched_at)
+            if fetched.tzinfo is None:
+                fetched = fetched.replace(tzinfo=timezone.utc)
+            return (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
+        except ValueError:
+            return None
+    
+    async def fetch_series(
+        self, 
+        series_id: str, 
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Fetch a single FRED series.
+        
+        Args:
+            series_id: FRED series ID (e.g., 'DGS10')
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: End date (YYYY-MM-DD format)
+        
+        Returns:
+            DataFrame with 'date' and 'value' columns
+        """
+        if not self.api_key:
+            raise ValueError("FRED_API_KEY not configured")
+        
+        # Default to last 2 years if no dates provided
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+        
+        url = f"{self.base_url}/series/observations"
+        params = {
+            'series_id': series_id,
+            'api_key': self.api_key,
+            'file_type': 'json',
+            'observation_start': start_date,
+            'observation_end': end_date,
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+        
+        observations = data.get('observations', [])
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(observations)
+        if df.empty:
+            return pd.DataFrame(columns=['date', 'value'])
+        
+        # Clean up
+        df = df[['date', 'value']].copy()
+        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df = df.dropna(subset=['value'])
+        df['date'] = pd.to_datetime(df['date'])
+        
+        return df
+    
+    async def fetch_yield_curve(
+        self,
+        date: Optional[str] = None,
+        tenors: Optional[list[str]] = None
+    ) -> dict:
+        """
+        Fetch full yield curve for a specific date (concurrent requests).
+        """
+        tenors = tenors or list(self.series_map.keys())
+
+        if date:
+            start = date
+            end = date
+        else:
+            end = datetime.now().strftime('%Y-%m-%d')
+            # 10-day window: handles weekends, holidays, and late FRED publications
+            start = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+
+        async def _fetch_one(tenor: str):
+            series_id = self.series_map.get(tenor)
+            if not series_id:
+                return tenor, None, None
+            for attempt in range(2):   # one retry on 429
+                try:
+                    df = await self.fetch_series(series_id, start, end)
+                    if not df.empty:
+                        latest = df.iloc[-1]
+                        return tenor, float(latest['value']), latest['date']
+                    return tenor, None, None
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429 and attempt == 0:
+                        await asyncio.sleep(1.0)
+                        continue
+                    print(f"Error fetching {tenor} ({series_id}): {e}")
+                    return tenor, None, None
+                except Exception as e:
+                    print(f"Error fetching {tenor} ({series_id}): {e}")
+                    return tenor, None, None
+            return tenor, None, None
+
+        # Fetch all tenors concurrently (semaphore limits to 4 at a time to respect FRED rate limit)
+        sem = asyncio.Semaphore(4)
+
+        async def _fetch_one_throttled(tenor: str):
+            async with sem:
+                return await _fetch_one(tenor)
+
+        tasks = [_fetch_one_throttled(t) for t in tenors]
+        results = await asyncio.gather(*tasks)
+
+        yields: dict[str, float] = {}
+        latest_date = None
+        missing_tenors: list[str] = []
+
+        for tenor, value, obs_date in results:
+            if value is not None and obs_date is not None:
+                yields[tenor] = value
+                if latest_date is None or obs_date > latest_date:
+                    latest_date = obs_date
+            else:
+                missing_tenors.append(tenor)
+
+        if latest_date and yields:
+            stored = curve_store.upsert_curve(latest_date.strftime('%Y-%m-%d'), yields)
+            fetched_at = stored.fetched_at
+        else:
+            fetched_at = None
+
+        return {
+            'date': latest_date.strftime('%Y-%m-%d') if latest_date else None,
+            'yields': yields,
+            'metadata': {
+                'source': 'FRED',
+                'fetched_at': fetched_at,
+                'cache_status': 'refreshed' if fetched_at else 'miss',
+                'missing_tenors': missing_tenors,
+                'is_partial': len(missing_tenors) > 0,
+            }
+        }
+
+    async def get_yield_curve(
+        self,
+        date: Optional[str] = None,
+        tenors: Optional[list[str]] = None,
+        refresh: bool = False,
+    ) -> dict:
+        """Get a curve from local storage first, refreshing from FRED when needed."""
+        tenors = tenors or list(self.series_map.keys())
+
+        if date:
+            return await self.fetch_yield_curve(date=date, tenors=tenors)
+
+        cached = curve_store.latest_curve(tenors)
+        cache_age = self._cache_age_hours(cached.fetched_at) if cached else None
+        cache_fresh = cache_age is not None and cache_age <= settings.CURVE_CACHE_MAX_AGE_HOURS
+        cache_complete = cached is not None and all(tenor in cached.yields for tenor in tenors)
+
+        if cached and cache_fresh and cache_complete and not refresh:
+            missing = [tenor for tenor in tenors if tenor not in cached.yields]
+            return {
+                'date': cached.date,
+                'yields': cached.yields,
+                'metadata': {
+                    'source': cached.source,
+                    'fetched_at': cached.fetched_at,
+                    'cache_status': 'hit',
+                    'cache_age_hours': round(cache_age, 2) if cache_age is not None else None,
+                    'missing_tenors': missing,
+                    'is_partial': len(missing) > 0,
+                    'stale': False,
+                }
+            }
+
+        try:
+            refreshed = await self.fetch_yield_curve(tenors=tenors)
+            if refreshed['yields']:
+                return refreshed
+        except Exception as e:
+            if not cached:
+                raise
+            print(f"FRED refresh failed, using cached curve: {e}")
+
+        if cached:
+            missing = [tenor for tenor in tenors if tenor not in cached.yields]
+            return {
+                'date': cached.date,
+                'yields': cached.yields,
+                'metadata': {
+                    'source': cached.source,
+                    'fetched_at': cached.fetched_at,
+                    'cache_status': 'stale_fallback',
+                    'cache_age_hours': round(cache_age, 2) if cache_age is not None else None,
+                    'missing_tenors': missing,
+                    'is_partial': len(missing) > 0,
+                    'stale': True,
+                }
+            }
+
+        raise ValueError("No yield data available")
+    
+    async def fetch_curve_history(
+        self,
+        start_date: str,
+        end_date: str,
+        tenors: Optional[list[str]] = None
+    ) -> pd.DataFrame:
+        """
+        Fetch historical yield curves.
+        
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            tenors: List of tenors to include
+        
+        Returns:
+            DataFrame with date index and tenor columns
+        """
+        tenors = tenors or list(self.series_map.keys())
+        
+        cached = curve_store.curve_history(start_date, end_date, tenors)
+        if not cached.empty and all(tenor in cached.columns for tenor in tenors):
+            return cached
+
+        all_data = {}
+        
+        for tenor in tenors:
+            series_id = self.series_map.get(tenor)
+            if not series_id:
+                continue
+            
+            try:
+                df = await self.fetch_series(series_id, start_date, end_date)
+                if not df.empty:
+                    df = df.set_index('date')
+                    all_data[tenor] = df['value']
+            except Exception as e:
+                print(f"Error fetching {tenor}: {e}")
+                continue
+        
+        if not all_data:
+            return pd.DataFrame()
+        
+        # Combine all series
+        result = pd.DataFrame(all_data)
+        result = result.sort_index()
+
+        for date, row in result.iterrows():
+            yields = {
+                tenor: float(value)
+                for tenor, value in row.items()
+                if pd.notna(value)
+            }
+            if yields:
+                curve_store.upsert_curve(date.strftime('%Y-%m-%d'), yields)
+        
+        return result
+    
+    async def fetch_curve_changes(
+        self,
+        windows: list[str] = ['1D', '1W', '1M', '1Y'],
+        tenors: Optional[list[str]] = None
+    ) -> dict:
+        """
+        Calculate yield changes across different time windows.
+        
+        Args:
+            windows: List of time windows ('1D', '1W', '1M', '1Y')
+            tenors: List of tenors to include
+        
+        Returns:
+            Dict mapping window -> tenor -> change (in bp)
+        """
+        tenors = tenors or list(self.series_map.keys())
+        
+        # Map windows to days
+        window_days = {
+            '1D': 1,
+            '1W': 7,
+            '1M': 30,
+            '3M': 90,
+            '6M': 180,
+            '1Y': 365,
+        }
+        
+        # Fetch enough history
+        max_days = max(window_days.get(w, 1) for w in windows) + 10  # Buffer
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=max_days)).strftime('%Y-%m-%d')
+        
+        history = await self.fetch_curve_history(start_date, end_date, tenors)
+        
+        if history.empty:
+            return {}
+        
+        changes = {}
+        latest_date = history.index[-1]
+        latest_yields = history.iloc[-1]
+        
+        for window in windows:
+            days = window_days.get(window, 1)
+            target_date = latest_date - timedelta(days=days)
+            
+            # Find closest available date
+            available_dates = history.index[history.index <= target_date]
+            if len(available_dates) == 0:
+                continue
+            
+            comparison_date = available_dates[-1]
+            comparison_yields = history.loc[comparison_date]
+            
+            # Calculate changes in basis points
+            window_changes = {}
+            for tenor in tenors:
+                if tenor in latest_yields and tenor in comparison_yields:
+                    latest = latest_yields[tenor]
+                    comparison = comparison_yields[tenor]
+                    if pd.notna(latest) and pd.notna(comparison):
+                        change_bp = (latest - comparison) * 100  # Convert to bp
+                        window_changes[tenor] = round(change_bp, 1)
+            
+            changes[window] = {
+                'from_date': comparison_date.strftime('%Y-%m-%d'),
+                'to_date': latest_date.strftime('%Y-%m-%d'),
+                'changes': window_changes
+            }
+        
+        return changes
+
+
+# Singleton instance
+fred_client = FredClient()
