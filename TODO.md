@@ -2,40 +2,32 @@
 
 ## Launch (yield.252.capital)
 
-- [ ] Add GitHub secrets to `yield-curve-monitor` repo:
-  - `HOSTINGER_HOST` — VPS IP (same host as color.252.capital)
-  - `HOSTINGER_USER` — typically `deploy252`
-  - `SSH_PRIVATE_KEY`, `SSH_PASSPHRASE`
-  - `FRED_API_KEY`
-- [ ] DNS A record: `yield.252.capital` → VPS IP
-- [ ] Nginx: deploy `.github/workflows/nginx-template.conf`, enable site, reload
-- [ ] SSL: `certbot --expand --nginx -d yield.252.capital`
-- [ ] Push to `main` or run deploy workflow manually
-- [ ] Verify: `curl https://yield.252.capital` and `pm2 list` on VPS
-- [ ] Optional: link from 252.capital homepage
+- [x] GitHub secrets (HOSTINGER_*, SSH_*, FRED_API_KEY)
+- [x] DNS A record: yield.252.capital
+- [x] Nginx site enabled (update proxy to **3059** — see below)
+- [ ] SSL: `sudo certbot --expand --nginx -d yield.252.capital`
+- [ ] Deploy succeeds (GitHub Actions → PM2 `yield-curve` + `yield-curve-api`)
+- [ ] Verify https://yield.252.capital
 
-## Ports (confirmed — no conflicts)
+## Port registry (252 VPS — do not collide)
 
-| Port | Service | Project |
-|------|---------|---------|
-| 3050 | Next.js | rainbow-rachel |
-| 3051 | Next.js | compute-futures |
-| 3052 | Next.js | market-color (color.252.capital) |
-| 3053 | holo | holo.252.capital |
-| **3054** | **yield-curve** | **yield.252.capital** |
-| 3011–3013 | simple-timesheet | (3 apps) |
-| **8053** | **FastAPI** | **yield-curve-api (localhost only)** |
+| Port | App |
+|------|-----|
+| 3050 | rainbow-rachel |
+| 3051 | compute-futures |
+| 3052 | market-color |
+| 3053 | simple-timesheet-frontend |
+| 3054 | simple-timesheet-admin |
+| 3055 | simple-timesheet-platform |
+| 3056 | golf-directory |
+| 3057 | new-era-creative |
+| 3058 | atnc-landing |
+| **3059** | **yield-curve (yield.252.capital)** |
+| **8053** | **yield-curve-api (localhost only)** |
 
-Override locally via `PORT` env var (see README).
+Local dev may still use 3053/8053 on your Mac.
 
-## Post-launch polish
+## Post-launch
 
-- [ ] Favicon + OG image for yield.252.capital
-- [ ] CORS: add `https://yield.252.capital` in `backend/app/main.py` if direct API access needed
-- [ ] Optional PostgreSQL for long history (SQLite sufficient for v1)
-
-## Future enhancements
-
-- [ ] Dynamic DV01 from live CTD / futures prices
-- [ ] Mark-to-market notional (face × price), not just par face
-- [ ] Scheduled FRED refresh cron on VPS
+- [ ] Favicon/OG verified on production URL
+- [ ] Link from 252.capital homepage

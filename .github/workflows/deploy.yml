@@ -58,7 +58,7 @@ jobs:
           RELEASES_PATH="/var/www/releases"
           NEW_RELEASE_PATH="${RELEASES_PATH}/yield-curve_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           KEEP_RELEASES=3
-          FRONTEND_PORT=3054
+          FRONTEND_PORT=3059
           BACKEND_PORT=8053
 
           rollback() {
