@@ -50,7 +50,7 @@ const INSTRUMENTS_FALLBACK: InstrumentMeta[] = [
   { symbol: 'UB', name: 'Ultra Bond', fullName: 'Ultra T-Bond (Long Bond)', dv01: 230, contractSize: 100_000, durationEquiv: 23.0, primaryTenor: '30Y', deliverable: '25+ yr T-Bonds', exposures: { '10Y': 6.0, '20Y': 16.0, '30Y': 208.0 } },
 ]
 
-// ── KRD mini-chart ─────────────────────────────────────────────────────────────
+// ── KRD mini-chart (responsive via viewBox) ───────────────────────────────────
 
 function KrdMiniChart({
   exposures,
@@ -62,48 +62,123 @@ function KrdMiniChart({
   const tenors = ['2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y']
   const values = tenors.map((t) => exposures[t] ?? 0)
   const max = Math.max(...values, 1)
-  const w = 148, h = 56, barW = 16, gap = 5
+  // Logical canvas — SVG scales via viewBox to fill container
+  const vW = 154, vH = 58, barW = 16, gap = 6
 
   return (
-    <svg width={w} height={h} className="mt-1.5">
+    <svg
+      viewBox={`0 0 ${vW} ${vH}`}
+      width="100%"
+      style={{ display: 'block', marginTop: '6px' }}
+      preserveAspectRatio="xMidYMid meet"
+    >
       {tenors.map((t, i) => {
         const v = values[i]
-        const bh = Math.max(2, (v / max) * (h - 14))
+        const bh = Math.max(2, (v / max) * (vH - 16))
         const x = i * (barW + gap)
-        const y = h - 12 - bh
+        const y = vH - 12 - bh
         return (
           <g key={t}>
-            <rect
-              x={x} y={y} width={barW} height={bh}
-              rx={1}
-              fill={v > 0 ? '#ff6600' : 'rgba(255,255,255,0.1)'}
-              opacity={v > 0 ? 0.85 : 0.3}
+            <rect x={x} y={y} width={barW} height={bh} rx={1}
+              fill={v > 0 ? '#ff6600' : 'rgba(255,255,255,0.06)'}
+              opacity={v > 0 ? 0.85 : 0.4}
             />
             {v > 0 && (
-              <text
-                x={x + barW / 2} y={y - 2}
-                textAnchor="middle"
-                fontSize="6.5"
-                fill="rgba(255,153,0,0.7)"
-                fontFamily="JetBrains Mono, monospace"
-              >
+              <text x={x + barW / 2} y={y - 2} textAnchor="middle" fontSize="6"
+                fill="rgba(255,153,0,0.75)" fontFamily="JetBrains Mono, monospace">
                 {v}
               </text>
             )}
-            <text
-              x={x + barW / 2} y={h - 1}
-              textAnchor="middle"
-              fontSize="7"
-              fill="rgba(255,255,255,0.3)"
-              fontFamily="JetBrains Mono, monospace"
-            >
+            <text x={x + barW / 2} y={vH - 1} textAnchor="middle" fontSize="7"
+              fill="rgba(255,255,255,0.3)" fontFamily="JetBrains Mono, monospace">
               {t.replace('Y', '')}
             </text>
           </g>
         )
       })}
-      <text x={w - 2} y={9} textAnchor="end" fontSize="7" fill="rgba(255,255,255,0.2)" fontFamily="JetBrains Mono, monospace">
+      <text x={vW - 1} y={9} textAnchor="end" fontSize="7"
+        fill="rgba(255,255,255,0.18)" fontFamily="JetBrains Mono, monospace">
         ${dv01Total}/bp
+      </text>
+    </svg>
+  )
+}
+
+// ── Contracts bar chart ────────────────────────────────────────────────────────
+
+const ALL_INSTRUMENTS = ['ZT', 'ZF', 'ZN', 'TN', 'ZB', 'UB']
+
+function ContractsChart({ contracts }: { contracts: Record<string, number> }) {
+  const entries = ALL_INSTRUMENTS.map((sym) => ({
+    sym,
+    val: contracts[sym] ?? 0,
+  }))
+  const maxAbs = Math.max(...entries.map((e) => Math.abs(e.val)), 1)
+  const vW = 280, rowH = 22, pad = 28, barArea = vW - pad * 2
+  const vH = ALL_INSTRUMENTS.length * rowH + 8
+
+  return (
+    <svg viewBox={`0 0 ${vW} ${vH}`} width="100%" style={{ display: 'block' }}>
+      {/* Zero line */}
+      <line x1={pad + barArea / 2} y1={0} x2={pad + barArea / 2} y2={vH}
+        stroke="rgba(255,255,255,0.12)" strokeWidth={1} />
+
+      {entries.map(({ sym, val }, i) => {
+        const y = i * rowH + 4
+        const barLen = (Math.abs(val) / maxAbs) * (barArea / 2 - 2)
+        const isLong = val >= 0
+        const barX = isLong
+          ? pad + barArea / 2
+          : pad + barArea / 2 - barLen
+        const color = val === 0 ? 'rgba(255,255,255,0.1)' : isLong ? '#00cc66' : '#ff3333'
+
+        return (
+          <g key={sym}>
+            {/* Symbol label */}
+            <text x={pad - 4} y={y + rowH / 2 + 3.5} textAnchor="end"
+              fontSize="9" fontFamily="JetBrains Mono, monospace"
+              fill={val !== 0 ? '#ffcc00' : 'rgba(255,255,255,0.2)'}>
+              {sym}
+            </text>
+
+            {/* Track */}
+            <rect x={pad} y={y + 5} width={barArea} height={rowH - 10} rx={1}
+              fill="rgba(255,255,255,0.03)" />
+
+            {/* Bar */}
+            {val !== 0 && (
+              <rect x={barX} y={y + 4} width={Math.max(2, barLen)} height={rowH - 8}
+                rx={2} fill={color} opacity={0.85} />
+            )}
+
+            {/* Count label */}
+            {val !== 0 && (
+              <text
+                x={isLong ? barX + barLen + 3 : barX - 3}
+                y={y + rowH / 2 + 3.5}
+                textAnchor={isLong ? 'start' : 'end'}
+                fontSize="8" fontFamily="JetBrains Mono, monospace"
+                fill={color} opacity={0.9}>
+                {val > 0 ? '+' : ''}{val}
+              </text>
+            )}
+
+            {val === 0 && (
+              <text x={pad + barArea / 2} y={y + rowH / 2 + 3.5}
+                textAnchor="middle" fontSize="7.5"
+                fontFamily="JetBrains Mono, monospace"
+                fill="rgba(255,255,255,0.12)">
+                —
+              </text>
+            )}
+          </g>
+        )
+      })}
+
+      {/* Scale labels */}
+      <text x={pad + barArea / 2} y={vH - 1} textAnchor="middle" fontSize="6.5"
+        fill="rgba(255,255,255,0.2)" fontFamily="JetBrains Mono, monospace">
+        SHORT ← 0 → LONG
       </text>
     </svg>
   )
@@ -681,20 +756,17 @@ export default function HedgeOptimizer() {
               </div>
 
               {/* ── KRD profile chart ── */}
-              <Panel title="Key-Rate Profile" bodyClassName="p-2 overflow-x-auto">
-                <div className="min-w-[420px]">
-                  <KrdProfileChart
-                    target={result.target_dv01}
-                    achieved={result.achieved_dv01}
-                    residual={result.residual}
-                    unit={unit}
-                    notional={refNotional}
-                    width={520}
-                    height={220}
-                    activeTenor={activeTenor}
-                    onTenorHover={setActiveTenor}
-                  />
-                </div>
+              <Panel title="Key-Rate DV01 Profile" bodyClassName="p-3">
+                <KrdProfileChart
+                  target={result.target_dv01}
+                  achieved={result.achieved_dv01}
+                  residual={result.residual}
+                  unit={unit}
+                  notional={refNotional}
+                  height={220}
+                  activeTenor={activeTenor}
+                  onTenorHover={setActiveTenor}
+                />
               </Panel>
 
               {/* ── KRD breakdown table ── */}
@@ -782,6 +854,11 @@ export default function HedgeOptimizer() {
 
               {/* ── Contract positions ── */}
               <SectionBlock title="Recommended Positions" id="positions" expanded={expandedSections.has('positions')} onToggle={toggleSection}>
+                {/* Contracts bar chart */}
+                <div className="mb-3 pb-3 border-b border-white/[0.06]">
+                  <div className="stat-label mb-1.5">CONTRACT ALLOCATION</div>
+                  <ContractsChart contracts={result.contracts} />
+                </div>
                 <table className="table-terminal w-full mb-3">
                   <thead>
                     <tr>

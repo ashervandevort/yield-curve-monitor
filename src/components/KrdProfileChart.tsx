@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useCallback } from 'react'
+import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { Group } from '@visx/group'
 import { scaleBand, scaleLinear } from '@visx/scale'
 import { AxisBottom, AxisLeft } from '@visx/axis'
@@ -13,18 +13,17 @@ interface KrdProfileChartProps {
   residual: Record<string, number>
   unit?: DisplayUnit
   notional?: number
-  width?: number
   height?: number
   activeTenor?: string | null
   onTenorHover?: (tenor: string | null) => void
 }
 
-const margin = { top: 16, right: 16, bottom: 32, left: 60 }
+const margin = { top: 20, right: 12, bottom: 32, left: 58 }
 
 const COLORS = {
   target:   '#00cccc',
   achieved: '#ff9900',
-  residual: '#ff3333',
+  residual: '#ff4444',
 }
 
 export default function KrdProfileChart({
@@ -33,11 +32,24 @@ export default function KrdProfileChart({
   residual,
   unit = 'krd',
   notional = 0,
-  width = 560,
-  height = 220,
+  height = 240,
   activeTenor,
   onTenorHover,
 }: KrdProfileChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(560)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      setWidth(entry.contentRect.width || 560)
+    })
+    ro.observe(el)
+    setWidth(el.getBoundingClientRect().width || 560)
+    return () => ro.disconnect()
+  }, [])
+
   const innerW = width - margin.left - margin.right
   const innerH = height - margin.top - margin.bottom
 
@@ -50,20 +62,24 @@ export default function KrdProfileChart({
   const allValues = useMemo(
     () =>
       tenors.flatMap((t) => [
-        convert(target[t] ?? 0, t),
-        convert(achieved[t] ?? 0, t),
-        convert(residual[t] ?? 0, t),
+        convert(target[t] ?? 0, t as KeyRateTenor),
+        convert(achieved[t] ?? 0, t as KeyRateTenor),
+        convert(residual[t] ?? 0, t as KeyRateTenor),
       ]),
     [tenors, target, achieved, residual, convert],
   )
 
-  const domainMax = Math.max(Math.abs(Math.max(...allValues, 0)), Math.abs(Math.min(...allValues, 0)), 1)
+  const domainMax = Math.max(
+    Math.abs(Math.max(...allValues, 0)),
+    Math.abs(Math.min(...allValues, 0)),
+    1,
+  )
   const padded = domainMax * 1.2
 
   const xScale = scaleBand<string>({
     domain: tenors,
     range: [0, innerW],
-    padding: 0.25,
+    padding: 0.22,
   })
 
   const yScale = scaleLinear<number>({
@@ -73,12 +89,11 @@ export default function KrdProfileChart({
   })
 
   const groupWidth = xScale.bandwidth()
-  const barW = Math.max(2, (groupWidth / 3) - 1)
-
+  const barW = Math.max(3, (groupWidth / 3) - 2)
   const zero = yScale(0)
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative w-full">
       {/* Legend */}
       <div className="flex items-center gap-4 mb-2 px-1">
         {Object.entries(COLORS).map(([key, color]) => (
@@ -91,20 +106,20 @@ export default function KrdProfileChart({
         ))}
       </div>
 
-      <svg width={width} height={height}>
-        <rect width={width} height={height} fill="#07090c" rx={2} />
+      <svg width={width} height={height} style={{ overflow: 'visible' }}>
+        <rect width={width} height={height} fill="transparent" rx={2} />
 
         <Group left={margin.left} top={margin.top}>
           {/* Zero line */}
           <line
             x1={0} x2={innerW}
             y1={zero} y2={zero}
-            stroke="rgba(255,255,255,0.12)"
+            stroke="rgba(255,255,255,0.15)"
             strokeWidth={1}
           />
 
           {/* Horizontal grid */}
-          {yScale.ticks(4).map((tick) => (
+          {yScale.ticks(5).filter(t => t !== 0).map((tick) => (
             <line
               key={tick}
               x1={0} x2={innerW}
@@ -132,52 +147,51 @@ export default function KrdProfileChart({
                 onMouseLeave={() => onTenorHover?.(null)}
                 style={{ cursor: 'pointer' }}
               >
-                {/* Hover highlight */}
                 {isActive && (
                   <rect
-                    x={x0 - 2}
+                    x={x0 - 3}
                     y={0}
-                    width={groupWidth + 4}
+                    width={groupWidth + 6}
                     height={innerH}
-                    fill="rgba(255,255,255,0.03)"
-                    rx={1}
+                    fill="rgba(255,255,255,0.035)"
+                    rx={2}
                   />
                 )}
 
                 {series.map(({ key, raw, color }, i) => {
                   const cv = convert(raw, tenor as KeyRateTenor)
                   const barY = cv >= 0 ? yScale(cv) : zero
-                  const barH = Math.abs(yScale(cv) - zero)
+                  const barH = Math.max(1, Math.abs(yScale(cv) - zero))
                   return (
                     <rect
                       key={key}
-                      x={x0 + i * (barW + 1)}
+                      x={x0 + i * (barW + 2)}
                       y={barY}
                       width={barW}
-                      height={Math.max(1, barH)}
+                      height={barH}
                       fill={color}
-                      opacity={isActive ? 1 : 0.75}
+                      opacity={isActive ? 1 : 0.78}
                       rx={1}
                     />
                   )
                 })}
 
-                {/* Active tenor tooltip */}
                 {isActive && (
                   <g>
                     {series.map(({ key, raw, color }, i) => {
                       const cv = convert(raw, tenor as KeyRateTenor)
-                      if (cv === 0) return null
+                      if (Math.abs(cv) < 0.001) return null
+                      const barH = Math.abs(yScale(cv) - zero)
                       return (
                         <text
                           key={key}
-                          x={x0 + i * (barW + 1) + barW / 2}
-                          y={cv >= 0 ? yScale(cv) - 3 : yScale(cv) + Math.abs(yScale(cv) - zero) + 11}
+                          x={x0 + i * (barW + 2) + barW / 2}
+                          y={cv >= 0 ? yScale(cv) - 4 : yScale(cv) + barH + 11}
                           textAnchor="middle"
                           fontSize={7}
                           fontFamily="JetBrains Mono, monospace"
                           fill={color}
-                          opacity={0.9}
+                          opacity={0.95}
                         >
                           {formatUnit(cv, unit)}
                         </text>
@@ -189,7 +203,6 @@ export default function KrdProfileChart({
             )
           })}
 
-          {/* Axes */}
           <AxisLeft
             scale={yScale}
             stroke="rgba(255,255,255,0.08)"
@@ -213,10 +226,10 @@ export default function KrdProfileChart({
             tickStroke="rgba(255,255,255,0.08)"
             tickLabelProps={() => ({
               fill: '#ffcc00',
-              fontSize: 9,
+              fontSize: 10,
               fontFamily: 'JetBrains Mono, monospace',
               textAnchor: 'middle',
-              dy: 4,
+              dy: 5,
             })}
           />
         </Group>
