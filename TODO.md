@@ -1,29 +1,39 @@
 # TODO
 
-## Ports
+## Launch (yield.252.capital)
 
-### Local dev port configuration
-Frontend and backend use default ports **3053** (frontend) and **8053** (backend).
-These can be overridden via environment variables before the dev server is started:
+- [ ] Add GitHub secrets to `yield-curve-monitor` repo:
+  - `HOSTINGER_HOST` — VPS IP (same host as color.252.capital)
+  - `HOSTINGER_USER` — typically `deploy252`
+  - `SSH_PRIVATE_KEY`, `SSH_PASSPHRASE`
+  - `FRED_API_KEY`
+- [ ] DNS A record: `yield.252.capital` → VPS IP
+- [ ] Nginx: deploy `.github/workflows/nginx-template.conf`, enable site, reload
+- [ ] SSL: `certbot --expand --nginx -d yield.252.capital`
+- [ ] Push to `main` or run deploy workflow manually
+- [ ] Verify: `curl https://yield.252.capital` and `pm2 list` on VPS
+- [ ] Optional: link from 252.capital homepage
 
-```bash
-# Override frontend port
-PORT=3060 npm run dev
+## Ports (confirmed — no conflicts)
 
-# Override backend port
-PORT=8060 uvicorn app.main:app --reload --port 8060
-```
+| Port | Service | Project |
+|------|---------|---------|
+| 3050 | Next.js | rainbow-rachel |
+| 3051 | Next.js | compute-futures |
+| 3052 | Next.js | market-color (color.252.capital) |
+| **3053** | **Next.js** | **yield-curve (yield.252.capital)** |
+| **8053** | **FastAPI** | **yield-curve-api (localhost only)** |
 
-The frontend `npm run dev` and `npm start` scripts read `$PORT` with a fallback of **3053**.
-The backend reads `PORT` from `.env` (see `backend/app/core/config.py`, default `8053`).
-The Next.js proxy routes read `BACKEND_URL` (default `http://localhost:8053`) — update this
-in `.env` if the backend port is changed.
+Override locally via `PORT` env var (see README).
 
-### Pre-VPS deployment
-Before deploying to the VPS, check available port assignments and update:
+## Post-launch polish
 
-1. Frontend port in the `start` npm script (or set `$PORT` in the PM2 ecosystem file).
-2. Backend `PORT` in production `.env`.
-3. nginx `proxy_pass` directives for both services.
-4. PM2 ecosystem file `PORT` / `BACKEND_URL` env vars.
-5. CORS `allow_origins` in `backend/app/main.py` — add the production domain.
+- [ ] Favicon + OG image for yield.252.capital
+- [ ] CORS: add `https://yield.252.capital` in `backend/app/main.py` if direct API access needed
+- [ ] Optional PostgreSQL for long history (SQLite sufficient for v1)
+
+## Future enhancements
+
+- [ ] Dynamic DV01 from live CTD / futures prices
+- [ ] Mark-to-market notional (face × price), not just par face
+- [ ] Scheduled FRED refresh cron on VPS

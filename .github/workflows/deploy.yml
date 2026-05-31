@@ -1,0 +1,169 @@
+name: Deploy Yield Curve Monitor to Hostinger
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_TIMESTAMP: temp_${{ github.run_id }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Create temp directory on VPS
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.HOSTINGER_HOST }}
+        username: ${{ secrets.HOSTINGER_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        passphrase: ${{ secrets.SSH_PASSPHRASE }}
+        script: |
+          DEPLOY_PATH="/var/www/yield-curve"
+          TEMP_PATH="${DEPLOY_PATH}_${{ env.DEPLOY_TIMESTAMP }}"
+          echo "Starting Yield Curve deployment with ID ${{ env.DEPLOY_TIMESTAMP }}"
+          mkdir -p $TEMP_PATH
+
+    - name: Sync files
+      uses: burnett01/rsync-deployments@5.2.1
+      with:
+        switches: -avz --delete --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='backend/venv' --exclude='backend/app/data/*.sqlite' --exclude='.env' --exclude='.env.local' --exclude='.env.production'
+        path: ./
+        remote_path: /var/www/yield-curve_${{ env.DEPLOY_TIMESTAMP }}
+        remote_host: ${{ secrets.HOSTINGER_HOST }}
+        remote_user: ${{ secrets.HOSTINGER_USER }}
+        remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
+        remote_key_pass: ${{ secrets.SSH_PASSPHRASE }}
+
+    - name: Finalize deployment
+      uses: appleboy/ssh-action@v1.0.0
+      env:
+        FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+      with:
+        host: ${{ secrets.HOSTINGER_HOST }}
+        username: ${{ secrets.HOSTINGER_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        passphrase: ${{ secrets.SSH_PASSPHRASE }}
+        envs: FRED_API_KEY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
+        script: |
+          set -e
+
+          DEPLOY_PATH="/var/www/yield-curve"
+          RELEASES_PATH="/var/www/releases"
+          NEW_RELEASE_PATH="${RELEASES_PATH}/yield-curve_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          KEEP_RELEASES=3
+          FRONTEND_PORT=3053
+          BACKEND_PORT=8053
+
+          rollback() {
+            echo "[YIELD CURVE ROLLBACK] Deployment failed."
+            FAILED=$1
+            PREVIOUS=$2
+            if [ -n "$PREVIOUS" ] && [ -L "$DEPLOY_PATH" ] && [ -d "$PREVIOUS" ]; then
+              if [ "$(readlink $DEPLOY_PATH)" == "$FAILED" ]; then
+                ln -sfn "$PREVIOUS" "$DEPLOY_PATH"
+                pm2 restart yield-curve yield-curve-api || true
+                pm2 save --force || true
+              fi
+            fi
+            [ -d "$FAILED" ] && rm -rf "$FAILED"
+            exit 1
+          }
+
+          TEMP_PATH="/var/www/yield-curve_${{ env.DEPLOY_TIMESTAMP }}"
+          if [ ! -d "$TEMP_PATH" ]; then echo "ERROR: temp path missing"; exit 1; fi
+          mkdir -p "$RELEASES_PATH"
+          [ -e "$NEW_RELEASE_PATH" ] && rm -rf "$NEW_RELEASE_PATH"
+          mv "$TEMP_PATH" "$NEW_RELEASE_PATH"
+
+          # ── Production env ──
+          cat > "$NEW_RELEASE_PATH/.env.production" << EOF
+          FRED_API_KEY='${{ secrets.FRED_API_KEY }}'
+          BACKEND_URL=http://127.0.0.1:${BACKEND_PORT}
+          SQLITE_CACHE_PATH=${NEW_RELEASE_PATH}/backend/app/data/yield_curve_cache.sqlite
+          CURVE_CACHE_MAX_AGE_HOURS=18
+          NEXT_TELEMETRY_DISABLED=1
+          NODE_ENV=production
+          PORT=${FRONTEND_PORT}
+          NEXT_PUBLIC_SITE_URL=https://yield.252.capital
+          EOF
+
+          cat > "$NEW_RELEASE_PATH/backend/.env" << EOF
+          FRED_API_KEY='${{ secrets.FRED_API_KEY }}'
+          SQLITE_CACHE_PATH=${NEW_RELEASE_PATH}/backend/app/data/yield_curve_cache.sqlite
+          CURVE_CACHE_MAX_AGE_HOURS=18
+          HOST=0.0.0.0
+          PORT=${BACKEND_PORT}
+          EOF
+
+          mkdir -p "$NEW_RELEASE_PATH/backend/app/data"
+
+          # ── Frontend build ──
+          cd "$NEW_RELEASE_PATH"
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          rm -rf node_modules .next
+          if ! pnpm install --frozen-lockfile; then
+            PREVIOUS=$(readlink $DEPLOY_PATH || echo "")
+            rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
+          fi
+          if ! pnpm run build; then
+            PREVIOUS=$(readlink $DEPLOY_PATH || echo "")
+            rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
+          fi
+
+          # ── Backend venv ──
+          cd "$NEW_RELEASE_PATH/backend"
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -q -r requirements.txt
+          deactivate
+
+          # ── Atomic swap ──
+          PREVIOUS=$(readlink $DEPLOY_PATH || echo "")
+          ln -sfn "$NEW_RELEASE_PATH" "$DEPLOY_PATH"
+
+          # ── PM2: FastAPI backend ──
+          if pm2 describe yield-curve-api > /dev/null 2>&1; then
+            pm2 delete yield-curve-api || true
+          fi
+          cd "$DEPLOY_PATH/backend"
+          pm2 start venv/bin/uvicorn --name yield-curve-api -- \
+            app.main:app --host 0.0.0.0 --port ${BACKEND_PORT}
+
+          # ── PM2: Next.js frontend ──
+          if pm2 describe yield-curve > /dev/null 2>&1; then
+            pm2 delete yield-curve || true
+          fi
+          cd "$DEPLOY_PATH"
+          pm2 start pnpm --name yield-curve -- start -- -p ${FRONTEND_PORT}
+
+          sleep 12
+
+          if ! curl --fail --silent --max-time 10 http://127.0.0.1:${BACKEND_PORT}/health > /dev/null; then
+            echo "Backend health check failed"
+            rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
+          fi
+          if ! curl --fail --silent --max-time 10 --head http://127.0.0.1:${FRONTEND_PORT} > /dev/null; then
+            echo "Frontend health check failed"
+            rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
+          fi
+
+          pm2 save --force
+
+          # Cleanup old releases
+          cd "$RELEASES_PATH"
+          ls -1td yield-curve_* 2>/dev/null | tail -n +$(($KEEP_RELEASES + 1)) | while read OLD; do
+            [ "$OLD" != "$(basename $(readlink -f $DEPLOY_PATH))" ] && rm -rf "$OLD"
+          done
+
+          echo "✓ Yield Curve Monitor deployed"
+          echo "  Frontend: http://127.0.0.1:${FRONTEND_PORT}"
+          echo "  Backend:  http://127.0.0.1:${BACKEND_PORT}/health"
+          echo "  Public:   https://yield.252.capital (after Nginx + DNS)"
