@@ -30,7 +30,8 @@ from app.core.fred_client import fred_client  # noqa: E402
 from app.core.curve_store import get_curve_store  # noqa: E402
 
 
-async def backfill(days: int = 730) -> None:
+async def backfill(days: int = 14) -> None:
+    """Incremental daily update — only fetch recent days to stay under FRED rate limits."""
     if not settings.FRED_API_KEY:
         raise SystemExit("FRED_API_KEY not configured")
 
@@ -38,7 +39,7 @@ async def backfill(days: int = 730) -> None:
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    print(f"[{datetime.now().isoformat()}] Backfilling {len(tenors)} tenors: {start} → {end}")
+    print(f"[{datetime.now().isoformat()}] Updating {len(tenors)} tenors: {start} → {end}")
     history = await fred_client.fetch_curve_history(start, end, tenors)
     store = get_curve_store()
     rows_before = getattr(store, "row_count", lambda: "?")()
@@ -56,4 +57,5 @@ async def backfill(days: int = 730) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(backfill(int(os.getenv("FRED_BACKFILL_DAYS", "730"))))
+    # Daily cron: 14-day window. Full history: FRED_BACKFILL_DAYS=730 (deploy/migration only).
+    asyncio.run(backfill(int(os.getenv("FRED_BACKFILL_DAYS", "14"))))
