@@ -6,6 +6,9 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 interface SpreadsPanelProps {
   data: SpreadsData | null
   loading?: boolean
+  selectedSpreads?: string[]
+  onSpreadToggle?: (spreadKey: string) => void
+  maxSelected?: number
 }
 
 const SPREAD_CONFIG: Record<
@@ -37,18 +40,30 @@ function regimeLabel(interpretation: string): { text: string; color: string; Ico
 function SpreadRow({
   spread,
   config,
+  spreadKey,
+  selected,
+  onToggle,
 }: {
   spread: { value: number; interpretation: string } | undefined
   config: (typeof SPREAD_CONFIG)[string]
+  spreadKey: string
+  selected?: boolean
+  onToggle?: (key: string) => void
 }) {
   if (!spread) return null
   const { text, color, Icon } = regimeLabel(spread.interpretation)
   const isPrimary = config.importance === 'primary'
+  const clickable = Boolean(onToggle)
 
   return (
-    <div
-      className={`flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0 ${
+    <button
+      type="button"
+      onClick={() => onToggle?.(spreadKey)}
+      disabled={!clickable}
+      className={`w-full text-left flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0 transition-colors ${
         isPrimary ? 'border-l-2 border-l-bloomberg-orange/60 pl-2' : 'pl-0.5'
+      } ${selected ? 'bg-bloomberg-orange/10' : clickable ? 'hover:bg-white/[0.03]' : ''} ${
+        clickable ? 'cursor-pointer' : 'cursor-default'
       }`}
     >
       <div className="min-w-0 flex-1 pr-2">
@@ -75,11 +90,17 @@ function SpreadRow({
           <span className="font-mono text-[8px] uppercase" style={{ color }}>{text}</span>
         </div>
       </div>
-    </div>
+    </button>
   )
 }
 
-export default function SpreadsPanel({ data, loading }: SpreadsPanelProps) {
+export default function SpreadsPanel({
+  data,
+  loading,
+  selectedSpreads = [],
+  onSpreadToggle,
+  maxSelected = 3,
+}: SpreadsPanelProps) {
   if (loading) {
     return (
       <div className="space-y-2">
@@ -112,7 +133,7 @@ export default function SpreadsPanel({ data, loading }: SpreadsPanelProps) {
         )}
         <br />
         <span style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Level today, not a change over time. Values in basis points.
+          Level today, not a change over time. Click up to {maxSelected} spreads to plot history.
         </span>
       </p>
 
@@ -120,8 +141,11 @@ export default function SpreadsPanel({ data, loading }: SpreadsPanelProps) {
         {ORDER.map((key) => (
           <SpreadRow
             key={key}
+            spreadKey={key}
             spread={data.spreads[key as keyof typeof data.spreads]}
             config={SPREAD_CONFIG[key]}
+            selected={selectedSpreads.includes(key)}
+            onToggle={onSpreadToggle}
           />
         ))}
       </div>

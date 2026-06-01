@@ -158,7 +158,8 @@ jobs:
         cd "$DEPLOY_PATH/backend"
         python -c "from app.core.curve_store import get_curve_store; s=get_curve_store(); s._ensure_db() if hasattr(s,'_ensure_db') else None"
         python scripts/migrate_sqlite_to_pg.py || echo "WARN: SQLite migration skipped"
-        FRED_BACKFILL_DAYS=730 python scripts/cron/fred_daily.py || echo "WARN: FRED backfill skipped"
+        python scripts/cron/fred_daily.py || echo "WARN: FRED incremental sync skipped"
+        python scripts/cron/macro_daily.py || echo "WARN: macro calendar sync skipped"
         deactivate
 
         pm2 delete yield-curve-api 2>/dev/null || true

@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { RefreshCw } from 'lucide-react'
 import { CurveMetadata } from '@/types'
+import ShareButton from '@/components/ShareButton'
 
 interface StatusBarProps {
+  /** FRED curve observation date (YYYY-MM-DD) */
+  curveDate?: string | null
   lastUpdated: Date | null
   loading: boolean
   onRefresh: () => void
@@ -23,28 +25,13 @@ const STATUS_CONFIG: Record<DataStatus, { color: string; dot: string; label: str
 }
 
 export default function StatusBar({
+  curveDate,
   lastUpdated,
   loading,
   onRefresh,
   backendStatus,
   curveMetadata,
 }: StatusBarProps) {
-  const [currentTime, setCurrentTime] = useState<Date | null>(null)
-
-  useEffect(() => {
-    setCurrentTime(new Date())
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-
-  const formatTime = (date: Date) =>
-    date.toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    })
-
-  const formatDateShort = (date: Date) =>
-    date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
-
   const dataStatus: DataStatus =
     backendStatus === 'disconnected'
       ? 'offline'
@@ -56,6 +43,11 @@ export default function StatusBar({
 
   const cfg = STATUS_CONFIG[dataStatus]
 
+  const formatRefreshTime = (date: Date) =>
+    date.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    })
+
   return (
     <div
       className="shrink-0 px-3 sm:px-4 py-2 sm:py-0 sm:h-10 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
@@ -64,7 +56,6 @@ export default function StatusBar({
         borderBottom: '1px solid rgba(255,255,255,0.06)',
       }}
     >
-      {/* Row 1 mobile / left desktop: brand + clock */}
       <div className="flex items-center justify-between sm:justify-start gap-2 sm:gap-3 min-w-0">
         <span
           className="font-mono text-[10px] sm:text-xs font-semibold tracking-widest shrink-0"
@@ -73,17 +64,13 @@ export default function StatusBar({
           YC MONITOR
         </span>
         <div className="hidden sm:block divider-v h-4" />
-        {currentTime ? (
-          <div className="flex items-center gap-1.5 sm:gap-2 font-mono text-[10px] sm:text-xs min-w-0">
-            <span className="hidden xs:inline" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              {formatDateShort(currentTime)}
-            </span>
-            <span style={{ color: 'rgba(255,255,255,0.75)' }}>{formatTime(currentTime)}</span>
-          </div>
+        {curveDate ? (
+          <span className="font-mono text-[10px] sm:text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            Curve <span className="text-yellow-400/90">{curveDate}</span>
+          </span>
         ) : (
           <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>···</span>
         )}
-        {/* Status inline on mobile (right side of row 1) */}
         <div className="flex sm:hidden items-center gap-1.5 ml-auto">
           <motion.div
             className="w-2 h-2 rounded-full shrink-0"
@@ -97,7 +84,6 @@ export default function StatusBar({
         </div>
       </div>
 
-      {/* Center title — tablet+ only (avoids mobile overlap) */}
       <div className="hidden md:flex items-center justify-center flex-1 pointer-events-none">
         <span
           className="font-mono font-semibold tracking-widest text-xs"
@@ -107,7 +93,6 @@ export default function StatusBar({
         </span>
       </div>
 
-      {/* Row 2 mobile / right desktop: status + refresh */}
       <div className="flex items-center justify-center sm:justify-end gap-2 sm:gap-3 flex-wrap">
         <div className="hidden sm:flex items-center gap-1.5">
           <motion.div
@@ -130,10 +115,14 @@ export default function StatusBar({
           <>
             <div className="hidden sm:block divider-v h-4" />
             <span className="font-mono text-[9px] sm:text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-              as of {formatTime(lastUpdated)}
+              refreshed {formatRefreshTime(lastUpdated)}
             </span>
           </>
         )}
+
+        <div className="hidden sm:block divider-v h-4" />
+
+        <ShareButton />
 
         <div className="hidden sm:block divider-v h-4" />
 

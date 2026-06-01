@@ -8,8 +8,14 @@ export type Tenor =
   | '1M' | '2M' | '3M' | '4M' | '6M'
   | '1Y' | '2Y' | '3Y' | '5Y' | '7Y' | '10Y' | '20Y' | '30Y'
 
-/** Tenors available for the "futures curve" chart view */
+/** CTD tenor bucket for a Treasury futures contract */
 export type FuturesTenor = '2Y' | '5Y' | '10Y' | '30Y'
+
+export interface FuturesContractPoint {
+  symbol: string
+  name: string
+  tenor: FuturesTenor
+}
 
 /** 7-point key-rate DV01 tenor grid used by the hedge optimizer */
 export type KeyRateTenor = '2Y' | '3Y' | '5Y' | '7Y' | '10Y' | '20Y' | '30Y'
@@ -127,6 +133,7 @@ export interface ScenarioRow {
   shocks: Record<string, number>
   pre_hedge: number
   hedge_pnl: number
+  combined_pnl?: number
   net_pnl: number
 }
 
@@ -227,7 +234,66 @@ export const TENOR_ORDER: Tenor[] = [
   '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y',
 ]
 
+/** Six CME Treasury futures mapped to FRED CTD yield buckets */
+export const FUTURES_CONTRACTS: FuturesContractPoint[] = [
+  { symbol: 'ZT', name: '2Y Note', tenor: '2Y' },
+  { symbol: 'ZF', name: '5Y Note', tenor: '5Y' },
+  { symbol: 'ZN', name: '10Y Note', tenor: '10Y' },
+  { symbol: 'TN', name: 'Ultra 10Y', tenor: '10Y' },
+  { symbol: 'ZB', name: '30Y Bond', tenor: '30Y' },
+  { symbol: 'UB', name: 'Ultra Bond', tenor: '30Y' },
+]
+
+export const FUTURES_CONTRACT_ORDER = FUTURES_CONTRACTS.map((c) => c.symbol)
+
+/** @deprecated use FUTURES_CONTRACTS — kept for tenor-level fallbacks */
 export const FUTURES_TENOR_ORDER: FuturesTenor[] = ['2Y', '5Y', '10Y', '30Y']
+
+export const SPREAD_CHART_COLORS: Record<string, string> = {
+  '2s10s': '#00cccc',
+  '3m10y': '#ff6600',
+  '5s30s': '#9966ff',
+  '2s30s': '#66cc66',
+  '2s5s': '#ff6666',
+  '5s10s30s': '#ffcc00',
+  '2s5s10s': '#cc66ff',
+}
+
+export interface MacroRelease {
+  release_id: number
+  name: string
+  category: string
+  date: string
+  days_from_today: number
+  day_of_week?: string
+  release_time_et?: string
+  release_time_label?: string
+  source?: string
+}
+
+export interface MarketDay {
+  date: string
+  day_type: 'closed' | 'early_close' | 'weekend'
+  name: string
+  close_time_et?: string | null
+}
+
+export interface MacroCalendarData {
+  events?: MacroRelease[]
+  market_days?: MarketDay[]
+  market_by_date?: Record<string, MarketDay>
+  cache_status?: 'hit' | 'refreshed'
+  storage_status?: 'stored' | 'synced'
+  stored_rows?: number
+  sync_age_hours?: number
+  storage?: string
+  data_version?: number
+}
+
+export interface SpreadHistoryPoint {
+  date: string
+  value: number
+}
 
 export const KEY_RATE_TENORS: KeyRateTenor[] = [
   '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y',

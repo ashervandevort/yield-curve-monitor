@@ -222,20 +222,35 @@ def build_scenario_comparison(
     residual_dv01: dict[str, float],
 ) -> list[dict]:
     """
-    Build a scenario P&L comparison table:
-    pre-hedge (target), hedge-only, and net (residual) P&L for each scenario.
+    Build scenario P&L comparison.
+
+    Sign convention: P&L = −Σ(DV01 × shock_bp). Positive DV01 = long duration.
+
+    Columns:
+      pre_hedge   — target book only (−target · shock)
+      hedge_pnl   — futures portfolio only (−achieved · shock)
+      combined_pnl — both legs held together (−(target+achieved) · shock)
+      net_pnl     — residual net exposure (−(target−achieved) · shock)
+
+    Note: net_pnl = pre_hedge − hedge_pnl (not the sum). combined_pnl = pre + hedge
+    when both legs are held in the same direction.
     """
     rows = []
     for name, shocks in SCENARIOS.items():
-        pre  = -sum(target_dv01.get(t, 0.0)   * shocks.get(t, 0.0) for t in KEY_RATE_TENORS)
-        hdg  = -sum(hedge_dv01.get(t, 0.0)    * shocks.get(t, 0.0) for t in KEY_RATE_TENORS)
-        net  = -sum(residual_dv01.get(t, 0.0) * shocks.get(t, 0.0) for t in KEY_RATE_TENORS)
+        pre = -sum(target_dv01.get(t, 0.0) * shocks.get(t, 0.0) for t in KEY_RATE_TENORS)
+        hdg = -sum(hedge_dv01.get(t, 0.0) * shocks.get(t, 0.0) for t in KEY_RATE_TENORS)
+        combined = -sum(
+            (target_dv01.get(t, 0.0) + hedge_dv01.get(t, 0.0)) * shocks.get(t, 0.0)
+            for t in KEY_RATE_TENORS
+        )
+        net = -sum(residual_dv01.get(t, 0.0) * shocks.get(t, 0.0) for t in KEY_RATE_TENORS)
         rows.append({
-            'name':      name,
-            'label':     SCENARIO_LABELS.get(name, name),
-            'shocks':    shocks,
+            'name': name,
+            'label': SCENARIO_LABELS.get(name, name),
+            'shocks': shocks,
             'pre_hedge': round(pre, 2),
             'hedge_pnl': round(hdg, 2),
-            'net_pnl':   round(net, 2),
+            'combined_pnl': round(combined, 2),
+            'net_pnl': round(net, 2),
         })
     return rows

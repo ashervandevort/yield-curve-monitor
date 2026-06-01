@@ -53,6 +53,14 @@ class CurveStoreTests(unittest.TestCase):
             self.assertEqual(len(history), 2)
             self.assertIn("2Y", history.columns)
 
+    def test_max_stored_date_tracks_latest_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = CurveStore(str(Path(tmpdir) / "curves.sqlite"))
+            self.assertIsNone(store.max_stored_date())
+            store.upsert_curve("2026-05-11", {"2Y": 4.25})
+            store.upsert_curve("2026-05-12", {"2Y": 4.30})
+            self.assertEqual(store.max_stored_date(), "2026-05-12")
+
 
 # ── HedgingOptimizer (7-tenor) ────────────────────────────────────────────────
 
@@ -201,7 +209,19 @@ class AnalyticsTests(unittest.TestCase):
         row = rows[0]
         self.assertIn("pre_hedge", row)
         self.assertIn("hedge_pnl", row)
+        self.assertIn("combined_pnl", row)
         self.assertIn("net_pnl", row)
+        # combined = pre + hedge when both legs same shock
+        shock = rows[0]["shocks"]["10Y"]
+        expected_combined = -(5000 + (-4800)) * shock
+        self.assertAlmostEqual(row["combined_pnl"], round(expected_combined, 2), places=0)
+
+    def test_net_pnl_equals_pre_minus_hedge(self) -> None:
+        target = {"10Y": 5_000, "2Y": 1_000}
+        hedge = {"10Y": 4_800, "2Y": 900}
+        residual = {t: target[t] - hedge[t] for t in target}
+        row = analytics.build_scenario_comparison(target, hedge, residual)[0]
+        self.assertAlmostEqual(row["net_pnl"], row["pre_hedge"] - row["hedge_pnl"], places=0)
 
     def test_all_standard_scenarios_present(self) -> None:
         expected = {
@@ -222,5 +242,94 @@ class AnalyticsTests(unittest.TestCase):
                 )
 
 
+class TestMacroCalendarHelpers(unittest.TestCase):
+    """Macro calendar dedupe and schedule helpers."""
+
+    def test_dedupe_enforces_min_gap(self) -> None:
+        from app.core.macro_calendar import _dedupe_release_dates
+
+        raw = ['2024-01-01', '2024-01-03', '2024-01-15', '2024-01-16']
+        kept = _dedupe_release_dates(raw, min_gap_days=7)
+        self.assertEqual(kept, ['2024-01-01', '2024-01-15'])
+
+    def test_cap_one_per_month(self) -> None:
+        from app.core.macro_calendar import _cap_one_per_month
+
+        raw = ['2024-01-05', '2024-01-12', '2024-02-01', '2024-02-20']
+        self.assertEqual(_cap_one_per_month(raw), ['2024-01-05', '2024-02-01'])
+
+    def test_fomc_uses_meeting_calendar_not_fred_cluster(self) -> None:
+        from datetime import date
+        from app.core.macro_calendar import _scheduled_dates_for_release
+
+        dates = _scheduled_dates_for_release(
+            'fomc',
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+        )
+        self.assertEqual(len(dates), 8)
+        self.assertIn('2025-01-29', dates)
+        self.assertIn('2025-12-10', dates)
+
+    def test_scheduled_releases_do_not_stack_five_per_day(self) -> None:
+        from datetime import date
+        from app.core.macro_calendar import MACRO_RELEASES, _scheduled_dates_for_release
+
+        start = date(2026, 4, 1)
+        end = date(2026, 7, 31)
+        by_date: dict[str, int] = {}
+
+        for key in MACRO_RELEASES:
+            for d in _scheduled_dates_for_release(key, start, end):
+                by_date[d] = by_date.get(d, 0) + 1
+
+        days_with_five = [d for d, n in by_date.items() if n >= 5]
+        self.assertEqual(days_with_five, [], f'days with 5+ releases: {days_with_five}')
+
+
+class TestMarketCalendar(unittest.TestCase):
+    def test_good_friday_2026(self) -> None:
+        from datetime import date
+        from app.core.market_calendar import bond_market_holidays
+
+        holidays = bond_market_holidays(2026)
+        self.assertIn(date(2026, 4, 3), holidays)
+        self.assertEqual(holidays[date(2026, 4, 3)], 'Good Friday')
+
+    def test_black_friday_early_close(self) -> None:
+        from datetime import date
+        from app.core.market_calendar import bond_market_early_closes
+
+        early = bond_market_early_closes(2026)
+        self.assertIn(date(2026, 11, 27), early)
+
+    def test_market_days_include_weekends(self) -> None:
+        from datetime import date
+        from app.core.market_calendar import market_by_date
+
+        m = market_by_date(date(2026, 5, 30), date(2026, 6, 1))
+        self.assertEqual(m['2026-05-30']['day_type'], 'weekend')
+        self.assertEqual(m['2026-05-31']['day_type'], 'weekend')
+
+
+class TestMacroStore(unittest.TestCase):
+    def test_store_round_trip_and_csv(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from app.core.macro_store import MacroStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = MacroStore(str(Path(tmpdir) / 'test.sqlite'))
+            store.upsert_dates('cpi', ['2026-01-12', '2026-02-12'], 'fred')
+            store.set_sync_meta('cpi', '2026-02-12')
+            dates = store.get_dates('cpi', '2026-01-01', '2026-03-01')
+            self.assertEqual(dates, ['2026-01-12', '2026-02-12'])
+            self.assertEqual(store.get_source('cpi', '2026-01-12'), 'fred')
+            csv_path = store.export_csv()
+            self.assertTrue(csv_path.exists())
+            self.assertEqual(store.row_count(), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -143,6 +143,17 @@ class PostgresCurveStore:
         pivot = frame.pivot(index="date", columns="tenor", values="yield_pct")
         return pivot.sort_index()
 
+    def max_stored_date(self) -> str | None:
+        """Return the latest calendar date present in storage, or None if empty."""
+        self._ensure_db()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT MAX(date) FROM {self.SCHEMA}.daily_curves")
+                row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        return row[0].strftime("%Y-%m-%d") if hasattr(row[0], "strftime") else str(row[0])
+
     def row_count(self) -> int:
         self._ensure_db()
         with self._connect() as conn:

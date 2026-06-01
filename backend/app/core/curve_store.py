@@ -148,6 +148,14 @@ class CurveStore:
         pivot.index = pd.to_datetime(pivot.index)
         return pivot.sort_index()
 
+    def max_stored_date(self) -> str | None:
+        """Return the latest calendar date present in storage, or None if empty."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(date) AS max_date FROM daily_curves").fetchone()
+        if not row or row["max_date"] is None:
+            return None
+        return str(row["max_date"])
+
     def row_count(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM daily_curves").fetchone()[0])

@@ -25,7 +25,9 @@ import {
   ChevronRight,
   RefreshCw,
   Info,
+  FileDown,
 } from 'lucide-react'
+import { exportHedgePdf } from '@/lib/exportHedgePdf'
 
 // ── Instrument config (static fallback; overridden by /api/hedge/instruments) ──
 
@@ -261,7 +263,11 @@ function signColor(v: number): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function HedgeOptimizer() {
+export default function HedgeOptimizer({
+  onResultChange,
+}: {
+  onResultChange?: (result: HedgeResult | null) => void
+}) {
   // ── Instrument data (loaded from backend) ─────────────────────────────────
   const [instruments, setInstruments] = useState<InstrumentMeta[]>(INSTRUMENTS_FALLBACK)
 
@@ -323,6 +329,10 @@ export default function HedgeOptimizer() {
   const [result, setResult] = useState<HedgeResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    onResultChange?.(result)
+  }, [result, onResultChange])
 
   const toggleSection = (key: string) =>
     setExpandedSections((prev) => {
@@ -732,7 +742,7 @@ export default function HedgeOptimizer() {
               className="space-y-3"
             >
               {/* ── Status + Unit toggle ── */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   {result.within_tolerance ? (
                     <CheckCircle className="w-4 h-4 text-green-400" />
@@ -752,7 +762,18 @@ export default function HedgeOptimizer() {
                     {result.effectiveness.effectiveness_pct.toFixed(1)}% effective
                   </span>
                 </div>
-                <UnitToggle value={unit} onChange={setUnit} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportHedgePdf(result)}
+                    className="flex items-center gap-1.5 px-2 py-1 btn-terminal"
+                    title="Export hedge results PDF"
+                  >
+                    <FileDown className="w-3 h-3" />
+                    <span className="text-[10px] font-mono hidden sm:inline">EXPORT PDF</span>
+                  </button>
+                  <UnitToggle value={unit} onChange={setUnit} />
+                </div>
               </div>
 
               {/* ── KRD profile chart ── */}

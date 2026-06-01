@@ -244,52 +244,48 @@ class FredClient:
 
         raise ValueError("No yield data available")
     
-    async def fetch_curve_history(
+    def _history_end_covered(
         self,
-        start_date: str,
+        cached: pd.DataFrame,
+        tenors: list[str],
         end_date: str,
-        tenors: Optional[list[str]] = None
+    ) -> bool:
+        """True when cached rows include complete tenors through end_date (±3 days)."""
+        if cached.empty or not all(tenor in cached.columns for tenor in tenors):
+            return False
+        complete = cached[tenors].dropna(how='any')
+        if complete.empty:
+            return False
+        end_ts = pd.Timestamp(end_date)
+        return complete.index.max() >= end_ts - pd.Timedelta(days=3)
+
+    async def _fetch_fred_history_slice(
+        self,
+        fetch_start: str,
+        end_date: str,
+        tenors: list[str],
     ) -> pd.DataFrame:
-        """
-        Fetch historical yield curves.
-        
-        Args:
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD)
-            tenors: List of tenors to include
-        
-        Returns:
-            DataFrame with date index and tenor columns
-        """
-        tenors = tenors or list(self.series_map.keys())
+        """Pull one date slice from FRED and upsert into local storage."""
+        all_data: dict[str, pd.Series] = {}
 
-        cached = curve_store.curve_history(start_date, end_date, tenors)
-        if self._history_cache_usable(cached, tenors, start_date):
-            return cached
-
-        all_data = {}
-        
         for tenor in tenors:
             series_id = self.series_map.get(tenor)
             if not series_id:
                 continue
-            
+
             try:
-                df = await self.fetch_series(series_id, start_date, end_date)
+                df = await self.fetch_series(series_id, fetch_start, end_date)
                 if not df.empty:
                     df = df.set_index('date')
                     all_data[tenor] = df['value']
             except Exception as e:
                 print(f"Error fetching {tenor}: {e}")
                 continue
-        
+
         if not all_data:
             return pd.DataFrame()
-        
-        # Combine all series
-        result = pd.DataFrame(all_data)
-        result = result.sort_index()
 
+        result = pd.DataFrame(all_data).sort_index()
         for date, row in result.iterrows():
             yields = {
                 tenor: float(value)
@@ -298,8 +294,42 @@ class FredClient:
             }
             if yields:
                 curve_store.upsert_curve(date.strftime('%Y-%m-%d'), yields)
-        
+
         return result
+
+    async def fetch_curve_history(
+        self,
+        start_date: str,
+        end_date: str,
+        tenors: Optional[list[str]] = None
+    ) -> pd.DataFrame:
+        """
+        Fetch historical yield curves, appending incrementally from local storage.
+
+        When storage already has data through date X, only FRED-fetches from
+        X-3 days through end_date, then returns the merged stored range.
+        """
+        tenors = tenors or list(self.series_map.keys())
+
+        cached = curve_store.curve_history(start_date, end_date, tenors)
+        if (
+            self._history_cache_usable(cached, tenors, start_date)
+            and self._history_end_covered(cached, tenors, end_date)
+        ):
+            return cached
+
+        max_stored = curve_store.max_stored_date()
+        fetch_start = start_date
+
+        if max_stored:
+            max_ts = pd.Timestamp(max_stored)
+            start_ts = pd.Timestamp(start_date)
+            if max_ts >= start_ts:
+                overlap_start = (max_ts - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
+                fetch_start = max(start_date, overlap_start)
+
+        await self._fetch_fred_history_slice(fetch_start, end_date, tenors)
+        return curve_store.curve_history(start_date, end_date, tenors)
     
     async def fetch_curve_changes(
         self,

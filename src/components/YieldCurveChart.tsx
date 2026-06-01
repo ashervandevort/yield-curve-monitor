@@ -12,7 +12,7 @@ import {
   CurveChartData,
   OverlayCurve,
   TENOR_ORDER,
-  FUTURES_TENOR_ORDER,
+  FUTURES_CONTRACT_ORDER,
   formatYield,
   CURVE_COLORS,
 } from '@/types'
@@ -27,6 +27,8 @@ interface YieldCurveChartProps {
   showGrid?: boolean
   showPoints?: boolean
   animate?: boolean
+  /** X-axis labels — defaults from curveType */
+  xDomain?: string[]
   /** External active tenor (lifted state from page) */
   activeTenor?: string | null
   onTenorChange?: (tenor: string | null) => void
@@ -43,10 +45,17 @@ export default function YieldCurveChart({
   showGrid = true,
   showPoints = true,
   animate = true,
+  xDomain,
   activeTenor: externalActiveTenor,
   onTenorChange,
 }: YieldCurveChartProps) {
-  const tenorOrder = curveType === 'futures' ? FUTURES_TENOR_ORDER : TENOR_ORDER
+  const tenorOrder =
+    xDomain ??
+    (curveType === 'futures'
+      ? FUTURES_CONTRACT_ORDER
+      : todayCurve.map((d) => d.tenor).filter(Boolean).length > 0
+        ? todayCurve.map((d) => d.tenor)
+        : TENOR_ORDER)
   const innerW = width - margin.left - margin.right
   const innerH = height - margin.top - margin.bottom
 

@@ -1,9 +1,19 @@
 """Yield curve API endpoints."""
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+
+import pandas as pd
 
 from ...core import fred_client, settings
+from ...core.curve_store import curve_store
+from ...core.spreads import (
+    SPREAD_DESCRIPTIONS,
+    SPREAD_KEYS,
+    compute_spread_series,
+    spread_snapshot,
+    tenors_for_spreads,
+)
 
 router = APIRouter(prefix='/curve', tags=['curve'])
 
@@ -179,8 +189,10 @@ async def get_key_spreads():
     Returns common spread measures like 2s10s, 5s30s, etc.
     """
     try:
-        # Fetch all tenors needed for spreads + butterflies + regime
-        needed_tenors = ['3M', '2Y', '5Y', '10Y', '20Y', '30Y']
+        needed_tenors = tenors_for_spreads(list(SPREAD_KEYS))
+        for tenor in ('20Y',):
+            if tenor not in needed_tenors:
+                needed_tenors.append(tenor)
         result = await fred_client.get_yield_curve(tenors=needed_tenors)
         yields = result['yields']
         
@@ -188,64 +200,10 @@ async def get_key_spreads():
             raise HTTPException(status_code=404, detail="Insufficient data for spreads")
         
         spreads = {}
-        
-        # 2s10s (10Y - 2Y) - Most watched
-        if '10Y' in yields and '2Y' in yields:
-            spreads['2s10s'] = {
-                'value': round((yields['10Y'] - yields['2Y']) * 100, 1),  # bp
-                'description': '10Y minus 2Y',
-                'interpretation': 'steepening' if yields['10Y'] > yields['2Y'] else 'inverted'
-            }
-        
-        # 5s30s (30Y - 5Y)
-        if '30Y' in yields and '5Y' in yields:
-            spreads['5s30s'] = {
-                'value': round((yields['30Y'] - yields['5Y']) * 100, 1),
-                'description': '30Y minus 5Y',
-                'interpretation': 'steepening' if yields['30Y'] > yields['5Y'] else 'inverted'
-            }
-        
-        # 3m10y (10Y - 3M) - Recession indicator
-        if '10Y' in yields and '3M' in yields:
-            spreads['3m10y'] = {
-                'value': round((yields['10Y'] - yields['3M']) * 100, 1),
-                'description': '10Y minus 3M',
-                'interpretation': 'normal' if yields['10Y'] > yields['3M'] else 'inverted'
-            }
-        
-        # 2s30s (30Y - 2Y)
-        if '30Y' in yields and '2Y' in yields:
-            spreads['2s30s'] = {
-                'value': round((yields['30Y'] - yields['2Y']) * 100, 1),
-                'description': '30Y minus 2Y',
-                'interpretation': 'steepening' if yields['30Y'] > yields['2Y'] else 'inverted'
-            }
-        
-        # 2s5s (5Y - 2Y)
-        if '5Y' in yields and '2Y' in yields:
-            spreads['2s5s'] = {
-                'value': round((yields['5Y'] - yields['2Y']) * 100, 1),
-                'description': '5Y minus 2Y',
-                'interpretation': 'steepening' if yields['5Y'] > yields['2Y'] else 'inverted'
-            }
-
-        # 5s10s30s butterfly: (5Y + 30Y)/2 - 10Y
-        if '5Y' in yields and '10Y' in yields and '30Y' in yields:
-            bfly = ((yields['5Y'] + yields['30Y']) / 2 - yields['10Y']) * 100
-            spreads['5s10s30s'] = {
-                'value': round(bfly, 1),
-                'description': '(5Y+30Y)/2 minus 10Y',
-                'interpretation': 'normal' if bfly > 0 else 'inverted'
-            }
-
-        # 2s5s10s butterfly: (2Y + 10Y)/2 - 5Y
-        if '2Y' in yields and '5Y' in yields and '10Y' in yields:
-            bfly2 = ((yields['2Y'] + yields['10Y']) / 2 - yields['5Y']) * 100
-            spreads['2s5s10s'] = {
-                'value': round(bfly2, 1),
-                'description': '(2Y+10Y)/2 minus 5Y',
-                'interpretation': 'normal' if bfly2 > 0 else 'inverted'
-            }
+        for spread_key in SPREAD_KEYS:
+            snapshot = spread_snapshot(spread_key, yields)
+            if snapshot:
+                spreads[spread_key] = snapshot
 
         # ── Curve regime ──────────────────────────────────────────────────────
         regime = None
@@ -260,7 +218,6 @@ async def get_key_spreads():
                 ((yields.get('2Y', 0) + yields.get('30Y', 0)) / 2 - yields.get('10Y', 0)) * 100, 1
             ) if all(t in yields for t in ('2Y', '10Y', '30Y')) else 0.0
 
-            # Regime label
             if slope < -10:
                 label = 'INVERTED'
             elif slope < 30:
@@ -288,5 +245,69 @@ async def get_key_spreads():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Need to import pandas for the history endpoint
-import pandas as pd
+def parse_spreads(spreads: str) -> list[str]:
+    """Parse and validate requested spread keys."""
+    spread_list = [s.strip().lower() for s in spreads.split(',') if s.strip()]
+    invalid = [spread for spread in spread_list if spread not in SPREAD_KEYS]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid spread(s): {invalid}. Valid spreads: {sorted(SPREAD_KEYS)}",
+        )
+    if not spread_list:
+        raise HTTPException(status_code=400, detail="At least one spread is required")
+    return spread_list
+
+
+@router.get('/spreads/history')
+async def get_spread_history(
+    spreads: str = Query(
+        '2s10s,3m10y',
+        description="Comma-separated spreads (e.g. '2s10s,3m10y,5s30s')",
+    ),
+    days: int = Query(
+        365,
+        ge=1,
+        le=3650,
+        description='Number of calendar days ending today',
+    ),
+):
+    """
+    Historical spread time series computed from stored curve history.
+
+    Uses the same formulas as GET /curve/spreads (basis points).
+    """
+    spread_list = parse_spreads(spreads)
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    tenor_list = tenors_for_spreads(spread_list)
+
+    try:
+        history = curve_store.curve_history(start_date, end_date, tenor_list)
+        if history.empty:
+            history = await fred_client.fetch_curve_history(start_date, end_date, tenor_list)
+
+        if history.empty:
+            raise HTTPException(status_code=404, detail="No spread history for specified range")
+
+        series_by_spread = {
+            spread_key: compute_spread_series(history, spread_key)
+            for spread_key in spread_list
+        }
+
+        if not any(series_by_spread.values()):
+            raise HTTPException(status_code=404, detail="No complete spread rows in range")
+
+        return {
+            'success': True,
+            'start_date': start_date,
+            'end_date': end_date,
+            'days': days,
+            'spreads': spread_list,
+            'descriptions': {key: SPREAD_DESCRIPTIONS[key] for key in spread_list},
+            'data': series_by_spread,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

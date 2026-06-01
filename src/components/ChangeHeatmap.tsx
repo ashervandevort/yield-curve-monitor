@@ -7,7 +7,7 @@ import { motion } from 'framer-motion'
 import {
   TimeWindow,
   TENOR_ORDER,
-  FUTURES_TENOR_ORDER,
+  FUTURES_CONTRACTS,
   getHeatmapColor,
   formatBasisPoints,
 } from '@/types'
@@ -55,8 +55,12 @@ export default function ChangeHeatmap({
   activeTenor,
   onTenorChange,
 }: ChangeHeatmapProps) {
-  const tenors = curveType === 'futures' ? FUTURES_TENOR_ORDER : TENOR_ORDER
-  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+  const columns = useMemo(() => {
+    if (curveType === 'futures') {
+      return FUTURES_CONTRACTS.map((c) => ({ label: c.symbol, tenor: c.tenor }))
+    }
+    return TENOR_ORDER.map((t) => ({ label: t, tenor: t }))
+  }, [curveType])
 
   const heatmapData = useMemo(
     () =>
@@ -66,20 +70,23 @@ export default function ChangeHeatmap({
           window: win,
           fromDate: wd?.from_date ?? '',
           toDate: wd?.to_date ?? '',
-          bins: tenors.map((tenor) => ({
-            tenor,
+          bins: columns.map(({ label, tenor }) => ({
+            tenor: label,
             value: wd?.changes[tenor] ?? null,
           })),
         }
       }),
-    [data, windows, tenors],
+    [data, windows, columns],
   )
 
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+
+  const columnLabels = columns.map((c) => c.label)
   const innerW = width - margin.left - margin.right
   const innerH = height - margin.top - margin.bottom
 
   const xScale = scaleBand<string>({
-    domain: tenors,
+    domain: columnLabels,
     range: [0, innerW],
     padding: 0.06,
   })
@@ -107,7 +114,7 @@ export default function ChangeHeatmap({
 
         <Group left={margin.left} top={margin.top}>
           {/* Column headers (tenors) */}
-          {tenors.map((tenor) => {
+          {columnLabels.map((tenor) => {
             const isActive = activeTenor === tenor
             return (
               <text
@@ -158,7 +165,7 @@ export default function ChangeHeatmap({
                   key={`${row.window}-${bin.tenor}`}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ delay: (ri * tenors.length + ci) * 0.008, duration: 0.15 }}
+                  transition={{ delay: (ri * columnLabels.length + ci) * 0.008, duration: 0.15 }}
                 >
                   <rect
                     x={x}

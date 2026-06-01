@@ -4,15 +4,11 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { ScenarioRow } from '@/types'
+import ScenarioPnLChart, { pnlColor } from './ScenarioPnLChart'
+import ChartContainer from './ChartContainer'
 
 interface ScenarioPanelProps {
   scenarios: ScenarioRow[]
-}
-
-function pnlColor(v: number): string {
-  if (v > 0) return '#00cc66'
-  if (v < 0) return '#ff3333'
-  return 'rgba(255,255,255,0.35)'
 }
 
 function fmt(v: number): string {
@@ -23,7 +19,6 @@ function fmt(v: number): string {
   return `${sign}$${v.toFixed(0)}`
 }
 
-// Group scenarios for collapsible display
 const GROUPS: { label: string; subtitle?: string; names: string[] }[] = [
   {
     label: 'Fed / Parallel',
@@ -60,23 +55,27 @@ export default function ScenarioPanel({ scenarios }: ScenarioPanelProps) {
   const byName = Object.fromEntries(scenarios.map((s) => [s.name, s]))
 
   return (
-    <div className="space-y-0.5">
-      {/* Explanation note */}
-      <div className="px-2 py-2 mb-1 rounded-[2px] bg-white/[0.02] border border-white/[0.05]">
+    <div className="space-y-3">
+      <div className="px-2 py-2 rounded-[2px] bg-white/[0.02] border border-white/[0.05]">
         <p className="font-mono text-[9px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Pre-Hedge</span> = P&amp;L on your target position alone.{'  '}
-          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Hedge</span> = P&amp;L from the futures contracts.{'  '}
-          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Net</span> = combined (residual exposure).
-          All values in USD. Formula: P&amp;L = −DV01 × Δrates (bp).
+          <span style={{ color: '#00cccc' }}>Target book</span> — P&amp;L on your entered KRD target only.{' '}
+          <span style={{ color: '#9966ff' }}>Futures book</span> — P&amp;L on optimized futures DV01 profile.{' '}
+          <span style={{ color: '#ff6600' }}>Combined</span> — both legs held together (target + futures).{' '}
+          <span style={{ color: '#ffcc00' }}>Net exposure</span> — residual unhedged DV01 (target − achieved).
+          Formula: P&amp;L = −Σ(DV01 × shock bp). Optimizer <em>matches</em> target exposure; it does not automatically flip sign.
         </p>
       </div>
 
-      {/* Header row */}
-      <div className="grid grid-cols-5 gap-1 px-2 py-1.5">
+      <ChartContainer>
+        {(width) => <ScenarioPnLChart scenarios={scenarios} width={width} height={220} />}
+      </ChartContainer>
+
+      <div className="grid grid-cols-6 gap-1 px-2 py-1.5">
         <div className="col-span-2 stat-label text-[9px]">SCENARIO</div>
-        <div className="stat-label text-[9px] text-right">PRE-HEDGE</div>
-        <div className="stat-label text-[9px] text-right">HEDGE</div>
-        <div className="stat-label text-[9px] text-right">NET</div>
+        <div className="stat-label text-[9px] text-right">TARGET</div>
+        <div className="stat-label text-[9px] text-right">FUTURES</div>
+        <div className="stat-label text-[9px] text-right">COMBINED</div>
+        <div className="stat-label text-[9px] text-right">NET EXP</div>
       </div>
 
       {GROUPS.map(({ label, subtitle, names }) => {
@@ -86,7 +85,6 @@ export default function ScenarioPanel({ scenarios }: ScenarioPanelProps) {
 
         return (
           <div key={label}>
-            {/* Group header */}
             <button
               onClick={() => toggle(label)}
               className="w-full flex items-center gap-1.5 px-2 py-1 hover:bg-white/[0.02] transition-colors"
@@ -121,30 +119,21 @@ export default function ScenarioPanel({ scenarios }: ScenarioPanelProps) {
                   {rows.map((row) => (
                     <div
                       key={row.name}
-                      className="grid grid-cols-5 gap-1 px-2 py-1 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.015]"
+                      className="grid grid-cols-6 gap-1 px-2 py-1 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.015]"
                     >
-                      <div
-                        className="col-span-2 font-mono text-[10px]"
-                        style={{ color: 'rgba(255,255,255,0.55)' }}
-                      >
+                      <div className="col-span-2 font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.55)' }}>
                         {row.label}
                       </div>
-                      <div
-                        className="font-mono text-[11px] font-medium text-right"
-                        style={{ color: pnlColor(row.pre_hedge) }}
-                      >
+                      <div className="font-mono text-[11px] font-medium text-right" style={{ color: pnlColor(row.pre_hedge) }}>
                         {fmt(row.pre_hedge)}
                       </div>
-                      <div
-                        className="font-mono text-[11px] font-medium text-right"
-                        style={{ color: pnlColor(row.hedge_pnl) }}
-                      >
+                      <div className="font-mono text-[11px] font-medium text-right" style={{ color: pnlColor(row.hedge_pnl) }}>
                         {fmt(row.hedge_pnl)}
                       </div>
-                      <div
-                        className="font-mono text-[11px] font-bold text-right"
-                        style={{ color: pnlColor(row.net_pnl) }}
-                      >
+                      <div className="font-mono text-[11px] font-medium text-right" style={{ color: pnlColor(row.combined_pnl ?? 0) }}>
+                        {fmt(row.combined_pnl ?? row.pre_hedge + row.hedge_pnl)}
+                      </div>
+                      <div className="font-mono text-[11px] font-bold text-right" style={{ color: pnlColor(row.net_pnl) }}>
                         {fmt(row.net_pnl)}
                       </div>
                     </div>

@@ -32,6 +32,7 @@ class Settings:
         str(Path(__file__).parent.parent / 'data' / 'yield_curve_cache.sqlite')
     )
     CURVE_CACHE_MAX_AGE_HOURS: int = int(os.getenv('CURVE_CACHE_MAX_AGE_HOURS', '18'))
+    MACRO_SYNC_MAX_AGE_HOURS: int = int(os.getenv('MACRO_SYNC_MAX_AGE_HOURS', '24'))
 
     # Server
     HOST: str = os.getenv('HOST', '0.0.0.0')

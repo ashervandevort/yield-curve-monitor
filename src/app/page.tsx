@@ -12,21 +12,41 @@ import {
   StatusBar,
   CurveRegime,
   ExportPdfButton,
+  ChartContainer,
+  SpreadTimeSeriesChart,
+  spreadColor,
+  MacroCalendar,
 } from '@/components'
+import { ShareLinks } from '@/components/ShareButton'
 import {
   CurveType,
   SpreadsData,
   CurveChartData,
   OverlayCurve,
   YieldCurve,
+  HedgeResult,
   TENOR_ORDER,
-  FUTURES_TENOR_ORDER,
+  FUTURES_CONTRACTS,
+  FUTURES_CONTRACT_ORDER,
+  SpreadHistoryPoint,
   tenorToYears,
   CURVE_COLORS,
 } from '@/types'
 
 type SpreadsWithRegime = SpreadsData & {
   regime?: { level: number; slope: number; curvature: number; label: string }
+}
+
+type TabId = 'monitor' | 'hedge' | 'macro'
+
+const SPREAD_LABELS: Record<string, string> = {
+  '2s10s': '2s10s',
+  '3m10y': '3m10y',
+  '5s30s': '5s30s',
+  '2s30s': '2s30s',
+  '2s5s': '2s5s',
+  '5s10s30s': '5s10s30s',
+  '2s5s10s': '2s5s10s',
 }
 
 export default function Home() {
@@ -38,8 +58,10 @@ export default function Home() {
   const [latestCurve, setLatestCurve]           = useState<YieldCurve | null>(null)
   const [changesData, setChangesData]           = useState<Record<string, { from_date: string; to_date: string; changes: Record<string, number> }> | null>(null)
   const [spreadsData, setSpreadsData]           = useState<SpreadsWithRegime | null>(null)
-  const [activeTab, setActiveTab]               = useState<'monitor' | 'hedge'>('monitor')
+  const [activeTab, setActiveTab]               = useState<TabId>('monitor')
   const [activeTenor, setActiveTenor]           = useState<string | null>(null)
+  const [selectedSpreads, setSelectedSpreads]   = useState<string[]>([])
+  const [spreadHistory, setSpreadHistory]       = useState<Record<string, SpreadHistoryPoint[]>>({})
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -73,29 +95,61 @@ export default function Home() {
     }
   }, [curveType])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData() }, [curveType])
+  useEffect(() => { fetchData() }, [fetchData])
+
   useEffect(() => {
     const id = setInterval(fetchData, 60_000)
     return () => clearInterval(id)
   }, [fetchData])
 
+  useEffect(() => {
+    if (selectedSpreads.length === 0) {
+      setSpreadHistory({})
+      return
+    }
+    const q = selectedSpreads.join(',')
+    fetch(`/api/curve/spreads/history?spreads=${encodeURIComponent(q)}&days=365`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && d.data) setSpreadHistory(d.data)
+      })
+      .catch(() => setSpreadHistory({}))
+  }, [selectedSpreads])
+
+  const handleSpreadToggle = useCallback((key: string) => {
+    setSelectedSpreads((prev) => {
+      if (prev.includes(key)) return prev.filter((k) => k !== key)
+      if (prev.length >= 3) return [...prev.slice(1), key]
+      return [...prev, key]
+    })
+  }, [])
+
   const chartData: CurveChartData[] = useMemo(() => {
     if (!latestCurve) return []
-    const tenors = curveType === 'futures' ? FUTURES_TENOR_ORDER : TENOR_ORDER
-    return tenors
-      .filter((t) => latestCurve.yields[t] !== undefined)
-      .map((t) => ({
-        tenor: t,
-        tenorNumeric: tenorToYears[t],
-        yield: latestCurve.yields[t],
-        label: t,
-      }))
+    if (curveType === 'futures') {
+      return FUTURES_CONTRACTS.filter((c) => latestCurve.yields[c.tenor] !== undefined).map(
+        (c) => ({
+          tenor: c.symbol,
+          tenorNumeric: tenorToYears[c.tenor],
+          yield: latestCurve.yields[c.tenor],
+          label: c.symbol,
+        }),
+      )
+    }
+    return TENOR_ORDER.filter((t) => latestCurve.yields[t] !== undefined).map((t) => ({
+      tenor: t,
+      tenorNumeric: tenorToYears[t],
+      yield: latestCurve.yields[t],
+      label: t,
+    }))
   }, [latestCurve, curveType])
 
   const overlayData: OverlayCurve[] = useMemo(() => {
-    if (!latestCurve || !changesData) return []
-    const tenors = curveType === 'futures' ? FUTURES_TENOR_ORDER : TENOR_ORDER
+    if (!latestCurve || !changesData || selectedSpreads.length > 0) return []
+    const keys =
+      curveType === 'futures'
+        ? FUTURES_CONTRACTS.map((c) => ({ label: c.symbol, tenor: c.tenor }))
+        : TENOR_ORDER.map((t) => ({ label: t, tenor: t }))
     return selectedOverlays
       .filter((id) => changesData[id])
       .map((id) => {
@@ -104,32 +158,53 @@ export default function Home() {
           id,
           label: `${id} ago`,
           color: CURVE_COLORS[id as keyof typeof CURVE_COLORS] || '#888',
-          data: tenors
-            .filter((t) => latestCurve.yields[t] !== undefined && wd.changes[t] !== undefined)
-            .map((t) => ({
-              tenor: t,
-              tenorNumeric: tenorToYears[t],
-              yield: latestCurve.yields[t] - wd.changes[t] / 100,
-              label: t,
+          data: keys
+            .filter(({ tenor }) => latestCurve.yields[tenor] !== undefined && wd.changes[tenor] !== undefined)
+            .map(({ label, tenor }) => ({
+              tenor: label,
+              tenorNumeric: tenorToYears[tenor],
+              yield: latestCurve.yields[tenor] - wd.changes[tenor] / 100,
+              label,
             })),
         }
       })
-  }, [latestCurve, changesData, selectedOverlays, curveType])
+  }, [latestCurve, changesData, selectedOverlays, curveType, selectedSpreads.length])
+
+  const spreadChartSeries = useMemo(
+    () =>
+      selectedSpreads
+        .filter((k) => spreadHistory[k]?.length)
+        .map((k) => ({
+          key: k,
+          label: SPREAD_LABELS[k] ?? k,
+          color: spreadColor(k),
+          data: spreadHistory[k],
+        })),
+    [selectedSpreads, spreadHistory],
+  )
 
   const pdfPayload = useMemo(() => {
     if (!latestCurve || !spreadsData || !changesData) return null
-    return {
-      curve: latestCurve,
-      spreads: spreadsData,
-      changes: changesData,
-      curveType,
-    }
+    return { curve: latestCurve, spreads: spreadsData, changes: changesData, curveType }
   }, [latestCurve, spreadsData, changesData, curveType])
+
+  const chartTitle =
+    selectedSpreads.length > 0
+      ? `Spread History · ${selectedSpreads.join(', ')}`
+      : curveType === 'futures'
+        ? 'Treasury Futures Curve (CTD yields)'
+        : 'Treasury Yield Curve'
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: 'monitor', label: 'Curve Monitor' },
+    { id: 'hedge', label: 'Hedge Optimizer' },
+    { id: 'macro', label: 'Macro Calendar' },
+  ]
 
   return (
     <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: '#07090c' }}>
-      {/* ── Status bar ── */}
       <StatusBar
+        curveDate={latestCurve?.date ?? null}
         lastUpdated={lastUpdated}
         loading={loading}
         onRefresh={fetchData}
@@ -137,38 +212,36 @@ export default function Home() {
         curveMetadata={latestCurve?.metadata ?? null}
       />
 
-      {/* ── Main content ── */}
       <div className="flex-1 p-2 sm:p-3 min-h-0">
-
-        {/* Tab nav + curve toggle */}
         <div className="flex flex-col items-center sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div
-            className="flex items-center justify-center gap-0.5 p-0.5 rounded-[2px] w-full sm:w-auto"
+            className="flex items-center justify-center gap-0.5 p-0.5 rounded-[2px] w-full sm:w-auto flex-wrap"
             style={{ background: '#0f1318', border: '1px solid rgba(255,255,255,0.07)' }}
           >
-            {(['monitor', 'hedge'] as const).map((tab) => (
+            {tabs.map((tab) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className="px-3 sm:px-5 py-2 font-mono text-[10px] sm:text-xs font-semibold rounded-[1px] uppercase tracking-wider transition-all"
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="px-2 sm:px-4 py-2 font-mono text-[10px] sm:text-xs font-semibold rounded-[1px] uppercase tracking-wider transition-all"
                 style={{
-                  background: activeTab === tab ? '#ff6600' : 'transparent',
-                  color: activeTab === tab ? '#000' : 'rgba(255,255,255,0.4)',
+                  background: activeTab === tab.id ? '#ff6600' : 'transparent',
+                  color: activeTab === tab.id ? '#000' : 'rgba(255,255,255,0.4)',
                   letterSpacing: '0.07em',
                 }}
               >
-                {tab === 'monitor' ? 'Curve Monitor' : 'Hedge Optimizer'}
+                {tab.label}
               </button>
             ))}
           </div>
-          <div className="flex justify-center w-full sm:w-auto">
-            <CurveToggle value={curveType} onChange={setCurveType} />
-          </div>
+          {activeTab === 'monitor' && (
+            <div className="flex justify-center w-full sm:w-auto">
+              <CurveToggle value={curveType} onChange={setCurveType} />
+            </div>
+          )}
         </div>
 
-        {/* ── Tab content ── */}
         <AnimatePresence mode="wait">
-          {activeTab === 'monitor' ? (
+          {activeTab === 'monitor' && (
             <motion.div
               key="monitor"
               initial={{ opacity: 0, x: -8 }}
@@ -176,44 +249,56 @@ export default function Home() {
               exit={{ opacity: 0, x: 8 }}
               transition={{ duration: 0.15 }}
             >
-              {/* Responsive: stacks vertically below xl, side-by-side at xl+ */}
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
-
-                {/* ── Chart + heatmap (xl: 8-col) ── */}
                 <div className="xl:col-span-8 space-y-3 min-w-0">
-
-                  {/* Yield curve */}
                   <div className="panel">
                     <div className="panel-header flex-col sm:flex-row items-center gap-2">
-                      <span className="panel-title">Treasury Yield Curve</span>
+                      <span className="panel-title">{chartTitle}</span>
                       <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
-                        <OverlaySelector selected={selectedOverlays} onChange={setSelectedOverlays} />
+                        {selectedSpreads.length === 0 && (
+                          <OverlaySelector selected={selectedOverlays} onChange={setSelectedOverlays} />
+                        )}
+                        {selectedSpreads.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSpreads([])}
+                            className="px-2 py-1 btn-terminal text-[10px] font-mono"
+                          >
+                            CLEAR SPREADS
+                          </button>
+                        )}
                         <ExportPdfButton payload={pdfPayload} disabled={loading} />
                       </div>
                     </div>
-                    <div className="p-2 overflow-x-auto">
-                      {loading && chartData.length === 0 ? (
+                    <div className="p-2 w-full">
+                      {loading && chartData.length === 0 && selectedSpreads.length === 0 ? (
                         <div className="h-64 flex items-center justify-center">
                           <div className="w-5 h-5 border-2 border-white/10 border-t-bloomberg-orange rounded-full animate-spin" />
                         </div>
                       ) : (
-                        <div className="min-w-[480px]">
-                          <YieldCurveChart
-                            todayCurve={chartData}
-                            overlays={overlayData}
-                            width={760}
-                            height={300}
-                            curveType={curveType}
-                            animate
-                            activeTenor={activeTenor}
-                            onTenorChange={setActiveTenor}
-                          />
-                        </div>
+                        <ChartContainer>
+                          {(width) =>
+                            selectedSpreads.length > 0 ? (
+                              <SpreadTimeSeriesChart series={spreadChartSeries} width={width} height={300} />
+                            ) : (
+                              <YieldCurveChart
+                                todayCurve={chartData}
+                                overlays={overlayData}
+                                width={width}
+                                height={300}
+                                curveType={curveType}
+                                xDomain={curveType === 'futures' ? FUTURES_CONTRACT_ORDER : undefined}
+                                animate
+                                activeTenor={activeTenor}
+                                onTenorChange={setActiveTenor}
+                              />
+                            )
+                          }
+                        </ChartContainer>
                       )}
                     </div>
                   </div>
 
-                  {/* Change heatmap */}
                   <div className="panel">
                     <div className="panel-header">
                       <span className="panel-title">Yield Changes (bp)</span>
@@ -221,18 +306,20 @@ export default function Home() {
                         {latestCurve?.date ?? '—'}
                       </span>
                     </div>
-                    <div className="p-2 overflow-x-auto">
+                    <div className="p-2 w-full">
                       {changesData ? (
-                        <div className="min-w-[480px]">
-                          <ChangeHeatmap
-                            data={changesData}
-                            curveType={curveType}
-                            width={740}
-                            height={165}
-                            activeTenor={activeTenor}
-                            onTenorChange={setActiveTenor}
-                          />
-                        </div>
+                        <ChartContainer>
+                          {(width) => (
+                            <ChangeHeatmap
+                              data={changesData}
+                              curveType={curveType}
+                              width={width}
+                              height={165}
+                              activeTenor={activeTenor}
+                              onTenorChange={setActiveTenor}
+                            />
+                          )}
+                        </ChartContainer>
                       ) : (
                         <div className="h-36 flex items-center justify-center">
                           <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
@@ -244,36 +331,31 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* ── Sidebar (xl: 4-col, otherwise full-width row below) ── */}
                 <div className="xl:col-span-4 grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 gap-3 content-start">
-
-                  {/* Key spreads */}
                   <div className="panel sm:col-span-1">
                     <div className="panel-header">
                       <span className="panel-title">Key Spreads</span>
-                      {spreadsData?.date && (
-                        <span className="panel-subtitle">{spreadsData.date}</span>
-                      )}
+                      {spreadsData?.date && <span className="panel-subtitle">{spreadsData.date}</span>}
                     </div>
                     <div className="panel-body-sm">
-                      <SpreadsPanel data={spreadsData} loading={loading && !spreadsData} />
+                      <SpreadsPanel
+                        data={spreadsData}
+                        loading={loading && !spreadsData}
+                        selectedSpreads={selectedSpreads}
+                        onSpreadToggle={handleSpreadToggle}
+                      />
                     </div>
                   </div>
 
-                  {/* Curve regime */}
                   <div className="panel sm:col-span-1">
                     <div className="panel-header">
                       <span className="panel-title">Curve Regime</span>
                     </div>
                     <div className="panel-body-sm">
-                      <CurveRegime
-                        regime={spreadsData?.regime ?? null}
-                        loading={loading && !spreadsData}
-                      />
+                      <CurveRegime regime={spreadsData?.regime ?? null} loading={loading && !spreadsData} />
                     </div>
                   </div>
 
-                  {/* Snapshot */}
                   <div className="panel sm:col-span-1">
                     <div className="panel-header">
                       <span className="panel-title">Snapshot</span>
@@ -281,17 +363,20 @@ export default function Home() {
                     <div className="panel-body-sm">
                       {latestCurve ? (
                         <div>
-                          {[
-                            { label: '2Y', key: '2Y' },
-                            { label: '5Y', key: '5Y' },
-                            { label: '10Y', key: '10Y' },
-                            { label: '20Y', key: '20Y' },
-                            { label: '30Y', key: '30Y' },
-                          ].map(({ label, key }) => (
-                            <div key={key} className="stat-row">
-                              <span className="tenor-label text-[10px]">{label}</span>
+                          {(curveType === 'futures'
+                            ? FUTURES_CONTRACTS
+                            : [
+                                { symbol: '2Y', tenor: '2Y' },
+                                { symbol: '5Y', tenor: '5Y' },
+                                { symbol: '10Y', tenor: '10Y' },
+                                { symbol: '20Y', tenor: '20Y' },
+                                { symbol: '30Y', tenor: '30Y' },
+                              ]
+                          ).map(({ symbol, tenor }) => (
+                            <div key={symbol} className="stat-row">
+                              <span className="tenor-label text-[10px]">{symbol}</span>
                               <span className="font-mono font-semibold text-sm" style={{ color: '#00cccc' }}>
-                                {latestCurve.yields[key]?.toFixed(3) ?? '—'}%
+                                {latestCurve.yields[tenor]?.toFixed(3) ?? '—'}%
                               </span>
                             </div>
                           ))}
@@ -303,31 +388,9 @@ export default function Home() {
                           <div className="stat-row">
                             <span className="stat-label">SOURCE</span>
                             <span className="font-mono text-xs" style={{ color: '#00cccc' }}>
-                              {latestCurve.metadata?.source ?? 'FRED'}
+                              {latestCurve.metadata?.source ?? 'FRED'} · daily close
                             </span>
                           </div>
-                          <div className="stat-row">
-                            <span className="stat-label">CACHE</span>
-                            <span
-                              className="font-mono text-xs font-semibold"
-                              style={{
-                                color: latestCurve.metadata?.stale || latestCurve.metadata?.is_partial
-                                  ? '#ff9900'
-                                  : '#00cc66',
-                              }}
-                            >
-                              {(latestCurve.metadata?.cache_status ?? 'live').toUpperCase()}
-                            </span>
-                          </div>
-                          {(latestCurve.metadata?.stale || latestCurve.metadata?.is_partial) && (
-                            <div className="mt-2 p-2 rounded-[2px] border border-yellow-500/25 bg-yellow-500/[0.04]">
-                              <span className="font-mono text-[9px] text-yellow-400">
-                                {latestCurve.metadata?.stale
-                                  ? 'STALE — FRED UNAVAILABLE'
-                                  : 'PARTIAL CURVE'}
-                              </span>
-                            </div>
-                          )}
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -341,7 +404,9 @@ export default function Home() {
                 </div>
               </div>
             </motion.div>
-          ) : (
+          )}
+
+          {activeTab === 'hedge' && (
             <motion.div
               key="hedge"
               initial={{ opacity: 0, x: 8 }}
@@ -360,16 +425,28 @@ export default function Home() {
               </div>
             </motion.div>
           )}
+
+          {activeTab === 'macro' && (
+            <motion.div
+              key="macro"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.15 }}
+            >
+              <MacroCalendar days={90} />
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
-      {/* ── Footer ── */}
       <footer
         className="px-4 py-2.5 flex flex-col sm:flex-row flex-wrap items-center justify-center sm:justify-between gap-2 font-mono text-[9px] text-center sm:text-left"
         style={{ background: '#0f1318', borderTop: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)' }}
       >
-        <span>Data: FRED (Federal Reserve Economic Data)</span>
+        <span>Data: FRED daily closes · Treasury constant maturity</span>
         <span>DV01 values are approximations · Not financial advice</span>
+        <ShareLinks />
         <span>
           Provided by{' '}
           <a

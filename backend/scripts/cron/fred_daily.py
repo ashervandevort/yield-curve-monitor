@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Daily FRED Treasury yield backfill — run on VPS after FRED publishes (~6 PM ET).
+Daily FRED Treasury yield update — append-only incremental sync.
 
 Usage:
   cd /var/www/yield-curve/backend && source venv/bin/activate
   python scripts/cron/fred_daily.py
+
+Full 730-day backfill (migration only):
+  FRED_FULL_BACKFILL=1 python scripts/cron/fred_daily.py
 
 Cron (deploy252):
   0 23 * * 1-5  cd /var/www/yield-curve/backend && ./venv/bin/python scripts/cron/fred_daily.py >> /var/log/yield-curve-fred.log 2>&1
@@ -29,33 +32,57 @@ from app.core.config import settings  # noqa: E402
 from app.core.fred_client import fred_client  # noqa: E402
 from app.core.curve_store import get_curve_store  # noqa: E402
 
+OVERLAP_DAYS = 5
+BOOTSTRAP_DAYS = 14
+FULL_BACKFILL_DAYS = 730
 
-async def backfill(days: int = 14) -> None:
-    """Incremental daily update — only fetch recent days to stay under FRED rate limits."""
+
+def resolve_fetch_window(store) -> tuple[str, str, str]:
+    """Return (start, end, mode) for the incremental FRED pull."""
+    end = datetime.now().strftime("%Y-%m-%d")
+
+    if os.getenv("FRED_FULL_BACKFILL") == "1":
+        start = (datetime.now() - timedelta(days=FULL_BACKFILL_DAYS)).strftime("%Y-%m-%d")
+        return start, end, "full_backfill"
+
+    max_date = store.max_stored_date()
+    if max_date:
+        start = (
+            datetime.strptime(max_date, "%Y-%m-%d") - timedelta(days=OVERLAP_DAYS)
+        ).strftime("%Y-%m-%d")
+        return start, end, "incremental"
+
+    start = (datetime.now() - timedelta(days=BOOTSTRAP_DAYS)).strftime("%Y-%m-%d")
+    return start, end, "bootstrap"
+
+
+async def run_daily_update() -> None:
+    """Append recent curve history and refresh the latest snapshot."""
     if not settings.FRED_API_KEY:
         raise SystemExit("FRED_API_KEY not configured")
 
     tenors = list(settings.FULL_TENORS)
-    end = datetime.now().strftime("%Y-%m-%d")
-    start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
-    print(f"[{datetime.now().isoformat()}] Updating {len(tenors)} tenors: {start} → {end}")
-    history = await fred_client.fetch_curve_history(start, end, tenors)
     store = get_curve_store()
-    rows_before = getattr(store, "row_count", lambda: "?")()
+    start, end, mode = resolve_fetch_window(store)
+    rows_before = store.row_count()
+    max_before = store.max_stored_date()
 
+    print(
+        f"[{datetime.now().isoformat()}] {mode}: {len(tenors)} tenors, "
+        f"{start} → {end} (stored max: {max_before or 'none'})"
+    )
+
+    history = await fred_client.fetch_curve_history(start, end, tenors)
     print(f"  History rows in frame: {len(history)}")
     print(f"  Store rows before: {rows_before}")
 
-    # Refresh latest snapshot
     latest = await fred_client.get_yield_curve(tenors=tenors, refresh=True)
     print(f"  Latest curve: {latest.get('date')} ({len(latest.get('yields', {}))} tenors)")
 
-    rows_after = getattr(store, "row_count", lambda: "?")()
-    print(f"  Store rows after: {rows_after}")
+    print(f"  Store rows after: {store.row_count()}")
+    print(f"  Stored max date: {store.max_stored_date()}")
     print("Done.")
 
 
 if __name__ == "__main__":
-    # Daily cron: 14-day window. Full history: FRED_BACKFILL_DAYS=730 (deploy/migration only).
-    asyncio.run(backfill(int(os.getenv("FRED_BACKFILL_DAYS", "14"))))
+    asyncio.run(run_daily_update())

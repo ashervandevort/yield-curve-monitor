@@ -17,6 +17,7 @@ env/
 # Backend data / cache
 backend/app/data/*.sqlite
 backend/app/data/*.db
+backend/app/data/*.csv
 
 # Environment
 .env

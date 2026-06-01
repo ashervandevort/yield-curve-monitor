@@ -1,0 +1,28 @@
+{
+  "name": "Yield Curve Monitor — Treasury Rates & DV01 Hedging",
+  "short_name": "Yield Curve",
+  "description": "Live Treasury yield curve, key spreads, macro calendar, and DV01 hedge optimizer with Treasury futures ZT–UB. FRED-backed.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07090c",
+  "theme_color": "#ff6600",
+  "orientation": "any",
+  "categories": ["finance", "business", "productivity"],
+  "lang": "en-US",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/og-image.svg",
+      "sizes": "1200x630",
+      "type": "image/svg+xml",
+      "label": "Treasury yield curve monitor dashboard"
+    }
+  ]
+}
