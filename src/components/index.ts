@@ -22,3 +22,4 @@ export { default as SpreadTimeSeriesChart, spreadColor } from './SpreadTimeSerie
 export { default as MacroCalendar } from './MacroCalendar'
 export { default as CurveWriteUpPanel } from './CurveWriteUpPanel'
 export { default as YieldContextPanel } from './YieldContextPanel'
+export { default as FuturesCurveHelp } from './FuturesCurveHelp'

@@ -13,8 +13,12 @@ export type FuturesTenor = '2Y' | '5Y' | '10Y' | '30Y'
 
 export interface FuturesContractPoint {
   symbol: string
+  /** Display name, e.g. "Ultra Bond" */
   name: string
+  /** FRED CTD yield bucket used for this contract on the curve */
   tenor: FuturesTenor
+  /** Approximate target maturity / duration bucket */
+  targetLabel: string
 }
 
 /** 7-point key-rate DV01 tenor grid used by the hedge optimizer */
@@ -237,12 +241,12 @@ export const TENOR_ORDER: Tenor[] = [
 
 /** Six CME Treasury futures mapped to FRED CTD yield buckets */
 export const FUTURES_CONTRACTS: FuturesContractPoint[] = [
-  { symbol: 'ZT', name: '2Y Note', tenor: '2Y' },
-  { symbol: 'ZF', name: '5Y Note', tenor: '5Y' },
-  { symbol: 'ZN', name: '10Y Note', tenor: '10Y' },
-  { symbol: 'TN', name: 'Ultra 10Y', tenor: '10Y' },
-  { symbol: 'ZB', name: '30Y Bond', tenor: '30Y' },
-  { symbol: 'UB', name: 'Ultra Bond', tenor: '30Y' },
+  { symbol: 'ZT', name: '2-Year Note', tenor: '2Y', targetLabel: '~2 yr' },
+  { symbol: 'ZF', name: '5-Year Note', tenor: '5Y', targetLabel: '~5 yr' },
+  { symbol: 'ZN', name: '10-Year Note', tenor: '10Y', targetLabel: '~10 yr' },
+  { symbol: 'TN', name: 'Ultra 10Y', tenor: '10Y', targetLabel: '~10 yr · longer CTD' },
+  { symbol: 'ZB', name: '30-Year Bond', tenor: '30Y', targetLabel: '~20–30 yr' },
+  { symbol: 'UB', name: 'Ultra Bond', tenor: '30Y', targetLabel: '~25+ yr' },
 ]
 
 export const FUTURES_CONTRACT_ORDER = FUTURES_CONTRACTS.map((c) => c.symbol)

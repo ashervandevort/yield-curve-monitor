@@ -18,6 +18,7 @@ import {
   MacroCalendar,
   CurveWriteUpPanel,
   YieldContextPanel,
+  FuturesCurveHelp,
 } from '@/components'
 import { ShareLinks } from '@/components/ShareButton'
 import {
@@ -253,8 +254,13 @@ export default function Home() {
             ))}
           </div>
           {activeTab === 'monitor' && (
-            <div className="flex justify-center w-full sm:w-auto">
+            <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
               <CurveToggle value={curveType} onChange={setCurveType} />
+              {curveType === 'futures' && (
+                <div className="w-full max-w-4xl">
+                  <FuturesCurveHelp />
+                </div>
+              )}
             </div>
           )}
         </div>
