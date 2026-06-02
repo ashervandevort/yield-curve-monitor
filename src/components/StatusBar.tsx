@@ -8,11 +8,14 @@ import ShareButton from '@/components/ShareButton'
 interface StatusBarProps {
   /** FRED curve observation date (YYYY-MM-DD) */
   curveDate?: string | null
-  lastUpdated: Date | null
+  /** When the page last fetched from our API (not FRED directly) */
+  lastFetched: Date | null
   loading: boolean
   onRefresh: () => void
   backendStatus: 'connected' | 'disconnected' | 'checking'
   curveMetadata?: CurveMetadata | null
+  /** Auto-refresh interval shown to user (minutes) */
+  autoRefreshMinutes?: number
 }
 
 type DataStatus = 'live' | 'stale' | 'offline' | 'checking'
@@ -24,13 +27,26 @@ const STATUS_CONFIG: Record<DataStatus, { color: string; dot: string; label: str
   checking: { color: 'rgba(255,255,255,0.3)', dot: 'rgba(255,255,255,0.3)', label: '···' },
 }
 
+function formatTime(date: Date) {
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
+}
+
+function curveDateHint(metadata?: CurveMetadata | null): string | null {
+  const lag = metadata?.observation_lag_days
+  if (lag == null || lag <= 4) return null
+  return `${lag}d behind today — run curve sync or hit refresh with backend up`
+}
+
 export default function StatusBar({
   curveDate,
-  lastUpdated,
+  lastFetched,
   loading,
   onRefresh,
   backendStatus,
   curveMetadata,
+  autoRefreshMinutes = 5,
 }: StatusBarProps) {
   const dataStatus: DataStatus =
     backendStatus === 'disconnected'
@@ -42,11 +58,7 @@ export default function StatusBar({
           : 'live'
 
   const cfg = STATUS_CONFIG[dataStatus]
-
-  const formatRefreshTime = (date: Date) =>
-    date.toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', hour12: false,
-    })
+  const staleHint = curveDateHint(curveMetadata)
 
   return (
     <div
@@ -65,8 +77,13 @@ export default function StatusBar({
         </span>
         <div className="hidden sm:block divider-v h-4" />
         {curveDate ? (
-          <span className="font-mono text-[10px] sm:text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            Curve <span className="text-yellow-400/90">{curveDate}</span>
+          <span className="font-mono text-[10px] sm:text-xs truncate" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            Close <span style={{ color: staleHint ? '#ff9900' : 'rgba(255,255,255,0.85)' }}>{curveDate}</span>
+            {staleHint && (
+              <span className="hidden lg:inline text-[9px] ml-1" style={{ color: '#ff9900' }}>
+                · {staleHint}
+              </span>
+            )}
           </span>
         ) : (
           <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>···</span>
@@ -111,11 +128,15 @@ export default function StatusBar({
           )}
         </div>
 
-        {lastUpdated && (
+        {lastFetched && (
           <>
             <div className="hidden sm:block divider-v h-4" />
-            <span className="font-mono text-[9px] sm:text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-              refreshed {formatRefreshTime(lastUpdated)}
+            <span
+              className="font-mono text-[9px] sm:text-[10px]"
+              style={{ color: 'rgba(255,255,255,0.3)' }}
+              title="Time of last page fetch from our API (SQLite cache on backend — not a live clock, not a direct FRED poll)"
+            >
+              fetched {formatTime(lastFetched)} · auto {autoRefreshMinutes}m
             </span>
           </>
         )}
@@ -130,7 +151,7 @@ export default function StatusBar({
           onClick={onRefresh}
           disabled={loading}
           className="flex items-center gap-1.5 px-2 py-1 btn-terminal"
-          title="Refresh data"
+          title="Refresh page data (uses backend cache; FRED only when cache stale or forced)"
         >
           <motion.div
             animate={{ rotate: loading ? 360 : 0 }}

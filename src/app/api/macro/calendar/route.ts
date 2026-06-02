@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const url = `${BACKEND_URL}/api/v1/macro/calendar?${params.toString()}`
     const response = await fetch(url, {
       headers: { 'Content-Type': 'application/json' },
-      next: { revalidate: 3600 },
+      next: { revalidate: 60 },
     })
     const data = await response.json()
     if (!response.ok) {

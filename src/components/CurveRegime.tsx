@@ -26,7 +26,7 @@ const LABEL_COLOR: Record<string, string> = {
 const REGIME_RULES = [
   { label: 'INVERTED', rule: '2s10s slope < −10 bp' },
   { label: 'FLAT', rule: 'slope < 30 bp' },
-  { label: 'HUMPED', rule: 'belly butterfly > 20 bp' },
+  { label: 'HUMPED', rule: '2s10s30s butterfly > 20 bp' },
   { label: 'NORMAL', rule: 'otherwise' },
 ]
 
@@ -127,7 +127,7 @@ export default function CurveRegime({ regime, loading }: CurveRegimeProps) {
 
       <div>
         <div className="flex items-center justify-between mb-0.5">
-          <span className="stat-label">CURVATURE (BFLY)</span>
+          <span className="stat-label">CURVATURE (2s10s30s)</span>
           <span className="font-mono text-sm font-semibold" style={{ color: regime.curvature >= 0 ? '#9966ff' : '#ff9900' }}>
             {regime.curvature > 0 ? '+' : ''}{regime.curvature.toFixed(1)} bp
           </span>

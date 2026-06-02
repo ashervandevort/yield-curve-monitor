@@ -98,6 +98,53 @@ class MacroStore:
             ).fetchall()
         return [row['release_date'] for row in rows]
 
+    def resolve_dates_for_calendar(
+        self,
+        release_key: str,
+        start_date: str,
+        end_date: str,
+    ) -> list[str]:
+        """One date per month; prefer FRED over scheduled when both exist."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT release_date, source FROM macro_release_dates
+                WHERE release_key = ? AND release_date >= ? AND release_date <= ?
+                ORDER BY release_date
+                """,
+                (release_key, start_date, end_date),
+            ).fetchall()
+
+        source_rank = {'fred': 0, 'fomc': 0, 'scheduled': 1}
+        by_month: dict[str, sqlite3.Row] = {}
+        for row in rows:
+            ym = row['release_date'][:7]
+            cur = by_month.get(ym)
+            if cur is None:
+                by_month[ym] = row
+                continue
+            cur_rank = source_rank.get(cur['source'], 2)
+            new_rank = source_rank.get(row['source'], 2)
+            if new_rank < cur_rank:
+                by_month[ym] = row
+            elif new_rank == cur_rank and row['release_date'] < cur['release_date']:
+                by_month[ym] = row
+
+        return sorted(r['release_date'] for r in by_month.values())
+
+    def prune_past_scheduled(self) -> int:
+        """Drop stale scheduled rows in the past (published FRED rows are kept)."""
+        today = datetime.now(timezone.utc).date().isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                DELETE FROM macro_release_dates
+                WHERE source = 'scheduled' AND release_date < ?
+                """,
+                (today,),
+            )
+            return cur.rowcount
+
     def get_source(self, release_key: str, release_date: str) -> Optional[str]:
         with self._connect() as conn:
             row = conn.execute(

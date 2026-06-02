@@ -47,6 +47,7 @@ export interface CurveMetadata {
   missing_tenors: string[]
   is_partial: boolean
   stale?: boolean
+  observation_lag_days?: number
 }
 
 export interface HistoricalPoint {
@@ -323,17 +324,24 @@ export const CURVE_COLORS = {
   '1Y':  '#66cc66',
 } as const
 
-// Heatmap colour helpers
+// Heatmap colour helpers — background + readable text pairing
 export function getHeatmapColor(value: number): string {
-  if (value <= -30) return '#7a0000'
-  if (value <= -20) return '#bb2222'
-  if (value <= -10) return '#ee5555'
-  if (value <  -5)  return '#cc8888'
-  if (value <=  5)  return '#1a2232'
-  if (value <  10)  return '#006644'
-  if (value <  20)  return '#005533'
-  if (value <  30)  return '#004422'
-  return '#003311'
+  if (value <= -30) return '#5c1010'
+  if (value <= -20) return '#8b1a1a'
+  if (value <= -10) return '#b83232'
+  if (value <  -5)  return '#3d2830'
+  if (value <=  5)  return '#141a24'
+  if (value <  10)  return '#0d3d32'
+  if (value <  20)  return '#0a4d3a'
+  if (value <  30)  return '#085c42'
+  return '#064e38'
+}
+
+/** Text colour tuned for contrast on getHeatmapColor backgrounds */
+export function getHeatmapTextColor(value: number): string {
+  if (value <= -10 || value >= 10) return 'rgba(255,255,255,0.95)'
+  if (Math.abs(value) > 5) return 'rgba(255,255,255,0.82)'
+  return 'rgba(255,255,255,0.55)'
 }
 
 export function getChangeTextColor(value: number): string {

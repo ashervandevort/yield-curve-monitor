@@ -2,41 +2,41 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { MacroRelease, MarketDay } from '@/types'
+import { FileDown, Copy, Check } from 'lucide-react'
+import {
+  buildMacroCalendarText,
+  exportMacroCalendarPdf,
+  filterMacroExportPayload,
+  MacroExportPayload,
+} from '@/lib/exportMacroCalendar'
+import { MACRO_CATEGORY_COLOR, MACRO_MARKET_STYLE } from '@/lib/macroCalendarStyles'
 
 interface MacroCalendarProps {
   days?: number
 }
 
-const CATEGORY_COLOR: Record<string, string> = {
-  monetary_policy: '#ff6600',
-  inflation: '#9966ff',
-  labor: '#00cc66',
-  growth: '#ffcc00',
-}
+const VIEW_PAST_DAYS = 30
+const VIEW_FUTURE_DAYS = 60
 
-const MARKET_STYLE: Record<
-  MarketDay['day_type'],
-  { bg: string; border: string; label: string }
-> = {
-  closed: {
-    bg: 'rgba(255,51,51,0.14)',
-    border: 'rgba(255,80,80,0.35)',
-    label: 'Market closed',
-  },
-  early_close: {
-    bg: 'rgba(255,153,0,0.12)',
-    border: 'rgba(255,153,0,0.35)',
-    label: 'Early close (2:00 PM ET)',
-  },
-  weekend: {
-    bg: 'rgba(255,255,255,0.015)',
-    border: 'rgba(255,255,255,0.06)',
-    label: 'Weekend',
-  },
-}
+const CATEGORY_COLOR = MACRO_CATEGORY_COLOR
+
+const MARKET_STYLE = MACRO_MARKET_STYLE
 
 interface CalendarEvent extends MacroRelease {
   release_key?: string
+}
+
+function filterByWindow(releases: MacroRelease[], pastDays: number, futureDays: number): MacroRelease[] {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const start = new Date(today)
+  start.setDate(start.getDate() - pastDays)
+  const end = new Date(today)
+  end.setDate(end.getDate() + futureDays)
+  return releases.filter((r) => {
+    const d = new Date(r.date + 'T12:00:00')
+    return d >= start && d <= end
+  })
 }
 
 function toDisplayEvents(events: CalendarEvent[] | undefined): MacroRelease[] {
@@ -87,7 +87,7 @@ function CalendarLegend() {
       </span>
       {Object.entries(CATEGORY_COLOR).map(([cat, color]) => (
         <div key={cat} className="flex items-center gap-1.5 font-mono text-[8px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
-          <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
           {cat.replace('_', ' ')}
         </div>
       ))}
@@ -182,7 +182,7 @@ function MonthGrid({
             return (
               <div
                 key={iso}
-                className="aspect-square rounded-[2px] flex flex-col items-center justify-start pt-0.5 px-0.5 border"
+                className="aspect-square rounded-[2px] flex flex-col items-center justify-between py-0.5 px-0.5 border"
                 style={{
                   background,
                   borderColor,
@@ -207,14 +207,19 @@ function MonthGrid({
                     2p
                   </span>
                 )}
-                <div className="flex flex-wrap gap-0.5 justify-center mt-0.5">
+                <div className="flex flex-wrap gap-1 justify-center items-end mt-auto pb-0.5 min-h-[14px]">
                   {dayEvents.slice(0, 4).map((e) => (
                     <span
                       key={`${e.release_id}-${e.name}`}
-                      className="w-1 h-1 rounded-full"
+                      className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-black/20"
                       style={{ background: CATEGORY_COLOR[e.category] ?? '#888' }}
                     />
                   ))}
+                  {dayEvents.length > 4 && (
+                    <span className="font-mono text-[6px] leading-none" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      +{dayEvents.length - 4}
+                    </span>
+                  )}
                 </div>
               </div>
             )
@@ -225,12 +230,43 @@ function MonthGrid({
   )
 }
 
-export default function MacroCalendar({ days = 90 }: MacroCalendarProps) {
+export default function MacroCalendar({ days = 45 }: MacroCalendarProps) {
   const [releases, setReleases] = useState<MacroRelease[]>([])
+  const [marketDaysList, setMarketDaysList] = useState<MarketDay[]>([])
   const [marketByDate, setMarketByDate] = useState<Record<string, MarketDay>>({})
   const [storageMeta, setStorageMeta] = useState<{ status?: string; rows?: number; syncAge?: number }>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const exportPayload: MacroExportPayload | null = useMemo(() => {
+    if (!releases.length && !marketDaysList.length) return null
+    return filterMacroExportPayload({
+      days,
+      releases,
+      marketDays: marketDaysList,
+    })
+  }, [days, releases, marketDaysList])
+
+  const viewReleases = useMemo(
+    () => filterByWindow(releases, VIEW_PAST_DAYS, VIEW_FUTURE_DAYS),
+    [releases],
+  )
+
+  const viewMarketByDate = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const start = new Date(today)
+    start.setDate(start.getDate() - VIEW_PAST_DAYS)
+    const end = new Date(today)
+    end.setDate(end.getDate() + VIEW_FUTURE_DAYS)
+    const out: Record<string, MarketDay> = {}
+    for (const [iso, day] of Object.entries(marketByDate)) {
+      const d = new Date(iso + 'T12:00:00')
+      if (d >= start && d <= end) out[iso] = day
+    }
+    return out
+  }, [marketByDate])
 
   useEffect(() => {
     setLoading(true)
@@ -240,6 +276,7 @@ export default function MacroCalendar({ days = 90 }: MacroCalendarProps) {
         if (d.success && d.data) {
           setReleases(toDisplayEvents(d.data.events))
           setMarketByDate(d.data.market_by_date ?? {})
+          setMarketDaysList(d.data.market_days ?? [])
           setStorageMeta({
             status: d.data.storage_status,
             rows: d.data.stored_rows,
@@ -254,7 +291,7 @@ export default function MacroCalendar({ days = 90 }: MacroCalendarProps) {
       .finally(() => setLoading(false))
   }, [days])
 
-  const byMonth = useMemo(() => groupByMonth(releases), [releases])
+  const byMonth = useMemo(() => groupByMonth(viewReleases), [viewReleases])
   const today = new Date().toISOString().slice(0, 10)
 
   if (loading) {
@@ -277,18 +314,45 @@ export default function MacroCalendar({ days = 90 }: MacroCalendarProps) {
 
   return (
     <div className="space-y-4">
-      <p className="font-mono text-[9px] px-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
-        Source: SQLite + CSV backup · FRED incremental sync · US bond market holidays · ±{days} days
-        {storageMeta.status && (
-          <span className="ml-2">
-            · {storageMeta.status}
-            {storageMeta.rows != null && ` · ${storageMeta.rows} stored rows`}
-            {storageMeta.syncAge != null && storageMeta.status === 'stored'
-              ? ` · synced ${storageMeta.syncAge.toFixed(1)}h ago`
-              : ''}
-          </span>
-        )}
-      </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-1">
+        <p className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          Source: SQLite store · FRED sync via daily cron only · view −{VIEW_PAST_DAYS}/+{VIEW_FUTURE_DAYS}d · export −7/+45d
+          {storageMeta.status && (
+            <span className="ml-2">
+              · {storageMeta.status}
+              {storageMeta.rows != null && ` · ${storageMeta.rows} stored rows`}
+              {storageMeta.syncAge != null && storageMeta.status === 'stored'
+                ? ` · synced ${storageMeta.syncAge.toFixed(1)}h ago`
+                : ''}
+            </span>
+          )}
+        </p>
+        <div className="flex gap-2 shrink-0">
+          <button
+            type="button"
+            disabled={!exportPayload}
+            onClick={() => exportPayload && exportMacroCalendarPdf(exportPayload)}
+            className="flex items-center gap-1.5 px-2 py-1 btn-terminal disabled:opacity-40"
+          >
+            <FileDown className="w-3 h-3" />
+            <span className="text-[10px] font-mono">EXPORT PDF</span>
+          </button>
+          <button
+            type="button"
+            disabled={!exportPayload}
+            onClick={async () => {
+              if (!exportPayload) return
+              await navigator.clipboard.writeText(buildMacroCalendarText(exportPayload))
+              setCopied(true)
+              setTimeout(() => setCopied(false), 2000)
+            }}
+            className="flex items-center gap-1.5 px-2 py-1 btn-terminal disabled:opacity-40"
+          >
+            {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+            <span className="text-[10px] font-mono">{copied ? 'COPIED' : 'COPY TEXT'}</span>
+          </button>
+        </div>
+      </div>
 
       {/* Scrollable release list by month */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -309,7 +373,7 @@ export default function MacroCalendar({ days = 90 }: MacroCalendarProps) {
                   const color = CATEGORY_COLOR[r.category] ?? '#888'
                   const isPast = r.date < today
                   const isToday = r.date === today
-                  const market = marketByDate[r.date]
+                  const market = viewMarketByDate[r.date]
                   return (
                     <div
                       key={`${r.release_id}-${r.date}-${r.name}`}
@@ -392,7 +456,7 @@ export default function MacroCalendar({ days = 90 }: MacroCalendarProps) {
               key={`grid-${monthKey}`}
               monthKey={monthKey}
               events={items}
-              marketByDate={marketByDate}
+              marketByDate={viewMarketByDate}
               today={today}
             />
           ))}

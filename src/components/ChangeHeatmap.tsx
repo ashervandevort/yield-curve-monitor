@@ -9,6 +9,7 @@ import {
   TENOR_ORDER,
   FUTURES_CONTRACTS,
   getHeatmapColor,
+  getHeatmapTextColor,
   formatBasisPoints,
 } from '@/types'
 
@@ -26,7 +27,8 @@ interface ChangeHeatmapProps {
   curveType?: 'full' | 'futures'
   width?: number
   height?: number
-  /** Active tenor from proximity (linked to chart) */
+  /** Column labels aligned with the main chart x-axis */
+  columnLabels?: string[]
   activeTenor?: string | null
   onTenorChange?: (tenor: string | null) => void
 }
@@ -52,15 +54,25 @@ export default function ChangeHeatmap({
   curveType = 'full',
   width = 600,
   height = 180,
+  columnLabels: columnLabelsProp,
   activeTenor,
   onTenorChange,
 }: ChangeHeatmapProps) {
   const columns = useMemo(() => {
+    if (columnLabelsProp?.length) {
+      if (curveType === 'futures') {
+        return columnLabelsProp.map((label) => {
+          const c = FUTURES_CONTRACTS.find((f) => f.symbol === label)
+          return { label, tenor: c?.tenor ?? label }
+        })
+      }
+      return columnLabelsProp.map((label) => ({ label, tenor: label }))
+    }
     if (curveType === 'futures') {
       return FUTURES_CONTRACTS.map((c) => ({ label: c.symbol, tenor: c.tenor }))
     }
     return TENOR_ORDER.map((t) => ({ label: t, tenor: t }))
-  }, [curveType])
+  }, [curveType, columnLabelsProp])
 
   const heatmapData = useMemo(
     () =>
@@ -122,7 +134,7 @@ export default function ChangeHeatmap({
                 x={(xScale(tenor) ?? 0) + cellW / 2}
                 y={-10}
                 textAnchor="middle"
-                fill={isActive ? '#ff6600' : '#ffcc00'}
+                fill={isActive ? '#ff6600' : 'rgba(255,255,255,0.55)'}
                 fontSize={isActive ? 10 : 9}
                 fontFamily="JetBrains Mono, monospace"
                 fontWeight={isActive ? 700 : 500}
@@ -193,10 +205,9 @@ export default function ChangeHeatmap({
                           x: x + margin.left + cellW / 2,
                           y: y + margin.top,
                         })
+                      } else {
+                        setTooltip(null)
                       }
-                    }}
-                    onMouseLeave={() => {
-                      setTooltip(null)
                     }}
                   />
 
@@ -207,7 +218,7 @@ export default function ChangeHeatmap({
                       y={y + cellH / 2}
                       textAnchor="middle"
                       dominantBaseline="middle"
-                      fill={Math.abs(bin.value) > 15 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.55)'}
+                      fill={getHeatmapTextColor(bin.value)}
                       fontSize={cellW > 44 ? 9 : 7}
                       fontFamily="JetBrains Mono, monospace"
                       fontWeight={500}
@@ -250,11 +261,11 @@ export default function ChangeHeatmap({
       {/* Legend */}
       <div className="flex items-center justify-center gap-4 mt-2 text-[9px] font-mono">
         {[
-          { color: '#7a0000', label: '−30+ bp' },
-          { color: '#ee5555', label: '−10 bp' },
-          { color: '#1a2232', label: '0' },
-          { color: '#006644', label: '+10 bp' },
-          { color: '#003311', label: '+30+ bp' },
+          { color: '#5c1010', label: '−30+ bp' },
+          { color: '#b83232', label: '−10 bp' },
+          { color: '#141a24', label: '0' },
+          { color: '#0a4d3a', label: '+10 bp' },
+          { color: '#064e38', label: '+30+ bp' },
         ].map(({ color, label }) => (
           <div key={label} className="flex items-center gap-1">
             <div className="w-2.5 h-2.5 rounded-sm" style={{ background: color }} />

@@ -17,6 +17,22 @@ class FredClient:
         self.base_url = settings.FRED_BASE_URL
         self.series_map = settings.FRED_SERIES
 
+    def _observation_lag_days(self, curve_date: Optional[str]) -> Optional[int]:
+        if not curve_date:
+            return None
+        try:
+            obs = datetime.strptime(curve_date, '%Y-%m-%d').date()
+            return (datetime.now(timezone.utc).date() - obs).days
+        except ValueError:
+            return None
+
+    def _enrich_metadata(self, metadata: dict, curve_date: Optional[str]) -> dict:
+        lag = self._observation_lag_days(curve_date)
+        enriched = {**metadata, 'observation_lag_days': lag}
+        if lag is not None and lag > 4:
+            enriched['stale'] = True
+        return enriched
+
     def _history_cache_usable(
         self,
         cached: pd.DataFrame,
@@ -175,13 +191,13 @@ class FredClient:
         return {
             'date': latest_date.strftime('%Y-%m-%d') if latest_date else None,
             'yields': yields,
-            'metadata': {
+            'metadata': self._enrich_metadata({
                 'source': 'FRED',
                 'fetched_at': fetched_at,
                 'cache_status': 'refreshed' if fetched_at else 'miss',
                 'missing_tenors': missing_tenors,
                 'is_partial': len(missing_tenors) > 0,
-            }
+            }, latest_date.strftime('%Y-%m-%d') if latest_date else None),
         }
 
     async def get_yield_curve(
@@ -206,7 +222,7 @@ class FredClient:
             return {
                 'date': cached.date,
                 'yields': cached.yields,
-                'metadata': {
+                'metadata': self._enrich_metadata({
                     'source': cached.source,
                     'fetched_at': cached.fetched_at,
                     'cache_status': 'hit',
@@ -214,7 +230,7 @@ class FredClient:
                     'missing_tenors': missing,
                     'is_partial': len(missing) > 0,
                     'stale': False,
-                }
+                }, cached.date),
             }
 
         try:
@@ -231,7 +247,7 @@ class FredClient:
             return {
                 'date': cached.date,
                 'yields': cached.yields,
-                'metadata': {
+                'metadata': self._enrich_metadata({
                     'source': cached.source,
                     'fetched_at': cached.fetched_at,
                     'cache_status': 'stale_fallback',
@@ -239,7 +255,7 @@ class FredClient:
                     'missing_tenors': missing,
                     'is_partial': len(missing) > 0,
                     'stale': True,
-                }
+                }, cached.date),
             }
 
         raise ValueError("No yield data available")

@@ -313,6 +313,18 @@ class TestMarketCalendar(unittest.TestCase):
 
 
 class TestMacroStore(unittest.TestCase):
+    def test_resolve_prefers_fred_over_scheduled_same_month(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from app.core.macro_store import MacroStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = MacroStore(str(Path(tmpdir) / 'test.sqlite'))
+            store.upsert_dates('cpi', ['2026-06-10', '2026-06-12'], 'scheduled')
+            store.upsert_dates('cpi', ['2026-06-11'], 'fred')
+            resolved = store.resolve_dates_for_calendar('cpi', '2026-06-01', '2026-06-30')
+            self.assertEqual(resolved, ['2026-06-11'])
+
     def test_store_round_trip_and_csv(self) -> None:
         import tempfile
         from pathlib import Path

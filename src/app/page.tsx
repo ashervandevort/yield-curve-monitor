@@ -16,6 +16,8 @@ import {
   SpreadTimeSeriesChart,
   spreadColor,
   MacroCalendar,
+  CurveWriteUpPanel,
+  YieldContextPanel,
 } from '@/components'
 import { ShareLinks } from '@/components/ShareButton'
 import {
@@ -38,6 +40,10 @@ type SpreadsWithRegime = SpreadsData & {
 }
 
 type TabId = 'monitor' | 'hedge' | 'macro'
+
+/** Page auto-refresh — hits our API (SQLite cache), not FRED on every tick */
+const AUTO_REFRESH_MS = 5 * 60 * 1000
+const AUTO_REFRESH_MINUTES = AUTO_REFRESH_MS / 60_000
 
 const SPREAD_LABELS: Record<string, string> = {
   '2s10s': '2s10s',
@@ -95,10 +101,22 @@ export default function Home() {
     }
   }, [curveType])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  const chartColumnLabels = useMemo(() => {
+    if (curveType === 'futures') return [...FUTURES_CONTRACT_ORDER]
+    if (!latestCurve) return [...TENOR_ORDER]
+    return TENOR_ORDER.filter((t) => latestCurve.yields[t] !== undefined)
+  }, [curveType, latestCurve])
 
   useEffect(() => {
-    const id = setInterval(fetchData, 60_000)
+    setActiveTenor(null)
+  }, [curveType, selectedSpreads.length])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  useEffect(() => {
+    const id = setInterval(fetchData, AUTO_REFRESH_MS)
     return () => clearInterval(id)
   }, [fetchData])
 
@@ -205,11 +223,12 @@ export default function Home() {
     <div className="min-h-screen flex flex-col overflow-x-hidden" style={{ background: '#07090c' }}>
       <StatusBar
         curveDate={latestCurve?.date ?? null}
-        lastUpdated={lastUpdated}
+        lastFetched={lastUpdated}
         loading={loading}
         onRefresh={fetchData}
         backendStatus={backendStatus}
         curveMetadata={latestCurve?.metadata ?? null}
+        autoRefreshMinutes={AUTO_REFRESH_MINUTES}
       />
 
       <div className="flex-1 p-2 sm:p-3 min-h-0">
@@ -287,7 +306,7 @@ export default function Home() {
                                 width={width}
                                 height={300}
                                 curveType={curveType}
-                                xDomain={curveType === 'futures' ? FUTURES_CONTRACT_ORDER : undefined}
+                                xDomain={chartColumnLabels}
                                 animate
                                 activeTenor={activeTenor}
                                 onTenorChange={setActiveTenor}
@@ -315,6 +334,7 @@ export default function Home() {
                               curveType={curveType}
                               width={width}
                               height={165}
+                              columnLabels={chartColumnLabels}
                               activeTenor={activeTenor}
                               onTenorChange={setActiveTenor}
                             />
@@ -329,9 +349,76 @@ export default function Home() {
                       )}
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="panel">
+                      <div className="panel-header">
+                        <span className="panel-title">Snapshot</span>
+                      </div>
+                      <div className="panel-body-sm">
+                        {latestCurve ? (
+                          <div>
+                            {(curveType === 'futures'
+                              ? FUTURES_CONTRACTS
+                              : [
+                                  { symbol: '2Y', tenor: '2Y' },
+                                  { symbol: '5Y', tenor: '5Y' },
+                                  { symbol: '10Y', tenor: '10Y' },
+                                  { symbol: '20Y', tenor: '20Y' },
+                                  { symbol: '30Y', tenor: '30Y' },
+                                ]
+                            ).map(({ symbol, tenor }) => (
+                              <div key={symbol} className="stat-row">
+                                <span className="tenor-label text-[10px]">{symbol}</span>
+                                <span className="font-mono font-semibold text-sm" style={{ color: '#00cccc' }}>
+                                  {latestCurve.yields[tenor]?.toFixed(3) ?? '—'}%
+                                </span>
+                              </div>
+                            ))}
+                            <div className="divider-h my-2" />
+                            <div className="stat-row">
+                              <span className="stat-label">DATA DATE</span>
+                              <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                                {latestCurve.date}
+                              </span>
+                            </div>
+                            <div className="stat-row">
+                              <span className="stat-label">SOURCE</span>
+                              <span className="font-mono text-xs" style={{ color: '#00cccc' }}>
+                                {latestCurve.metadata?.source ?? 'FRED'} · daily close
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {[1, 2, 3, 4, 5].map((i) => (
+                              <div key={i} className="skeleton h-5 rounded" />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="panel">
+                      <div className="panel-header">
+                        <span className="panel-title">Market Write-Up</span>
+                      </div>
+                      <div className="panel-body-sm">
+                        <CurveWriteUpPanel
+                          curve={latestCurve}
+                          spreads={spreadsData}
+                          changes={changesData}
+                          curveType={curveType}
+                          loading={loading && !latestCurve}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <YieldContextPanel curve={latestCurve} loading={loading && !latestCurve} />
                 </div>
 
-                <div className="xl:col-span-4 grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 gap-3 content-start">
+                <div className="xl:col-span-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3 content-start">
                   <div className="panel sm:col-span-1">
                     <div className="panel-header">
                       <span className="panel-title">Key Spreads</span>
@@ -353,52 +440,6 @@ export default function Home() {
                     </div>
                     <div className="panel-body-sm">
                       <CurveRegime regime={spreadsData?.regime ?? null} loading={loading && !spreadsData} />
-                    </div>
-                  </div>
-
-                  <div className="panel sm:col-span-1">
-                    <div className="panel-header">
-                      <span className="panel-title">Snapshot</span>
-                    </div>
-                    <div className="panel-body-sm">
-                      {latestCurve ? (
-                        <div>
-                          {(curveType === 'futures'
-                            ? FUTURES_CONTRACTS
-                            : [
-                                { symbol: '2Y', tenor: '2Y' },
-                                { symbol: '5Y', tenor: '5Y' },
-                                { symbol: '10Y', tenor: '10Y' },
-                                { symbol: '20Y', tenor: '20Y' },
-                                { symbol: '30Y', tenor: '30Y' },
-                              ]
-                          ).map(({ symbol, tenor }) => (
-                            <div key={symbol} className="stat-row">
-                              <span className="tenor-label text-[10px]">{symbol}</span>
-                              <span className="font-mono font-semibold text-sm" style={{ color: '#00cccc' }}>
-                                {latestCurve.yields[tenor]?.toFixed(3) ?? '—'}%
-                              </span>
-                            </div>
-                          ))}
-                          <div className="divider-h my-2" />
-                          <div className="stat-row">
-                            <span className="stat-label">DATA DATE</span>
-                            <span className="font-mono text-xs text-yellow-400">{latestCurve.date}</span>
-                          </div>
-                          <div className="stat-row">
-                            <span className="stat-label">SOURCE</span>
-                            <span className="font-mono text-xs" style={{ color: '#00cccc' }}>
-                              {latestCurve.metadata?.source ?? 'FRED'} · daily close
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {[1, 2, 3, 4, 5].map((i) => (
-                            <div key={i} className="skeleton h-5 rounded" />
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -434,7 +475,7 @@ export default function Home() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.15 }}
             >
-              <MacroCalendar days={90} />
+              <MacroCalendar days={45} />
             </motion.div>
           )}
         </AnimatePresence>

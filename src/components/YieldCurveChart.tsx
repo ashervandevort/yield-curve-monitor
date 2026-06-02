@@ -90,27 +90,42 @@ export default function YieldCurveChart({
 
   const {
     activeTenor: localActiveTenor,
-    crosshairX,
-    rawY,
+    crosshairX: localCrosshairX,
+    rawY: localRawY,
     handleMouseMove,
     handleMouseLeave,
+    resolveNearest,
   } = useProximity(proximityPoints, margin.left)
 
-  // The effective active tenor: external (lifted) wins if set, otherwise local
   const activeTenor = externalActiveTenor ?? localActiveTenor
 
   const handleMove = useCallback(
     (e: React.MouseEvent<SVGElement>) => {
+      const hit = resolveNearest(e)
+      if (!hit) return
       handleMouseMove(e)
-      if (onTenorChange && localActiveTenor) onTenorChange(localActiveTenor)
+      onTenorChange?.(hit.activeTenor)
     },
-    [handleMouseMove, onTenorChange, localActiveTenor],
+    [handleMouseMove, onTenorChange, resolveNearest],
   )
 
   const handleLeave = useCallback(() => {
     handleMouseLeave()
     onTenorChange?.(null)
   }, [handleMouseLeave, onTenorChange])
+
+  const getX = useCallback((d: CurveChartData) => xScale(d.tenor) ?? 0, [xScale])
+  const getY = useCallback((d: CurveChartData) => yScale(d.yield) ?? 0, [yScale])
+
+  const activePoint = activeTenor ? todayCurve.find((d) => d.tenor === activeTenor) : null
+  const crosshairX =
+    activeTenor && activePoint
+      ? getX(activePoint) + margin.left
+      : localCrosshairX
+  const rawY =
+    activeTenor && activePoint
+      ? getY(activePoint) + margin.top
+      : localRawY
 
   // All curve yields at the active tenor
   const tenorReadout = useMemo(() => {
@@ -129,9 +144,6 @@ export default function YieldCurveChart({
     ].filter((r) => r.yield !== null)
     return rows
   }, [activeTenor, todayCurve, overlays])
-
-  const getX = (d: CurveChartData) => xScale(d.tenor) ?? 0
-  const getY = (d: CurveChartData) => yScale(d.yield) ?? 0
 
   return (
     <div className="relative select-none">
@@ -249,7 +261,7 @@ export default function YieldCurveChart({
             })}
 
           {/* Proximity crosshair */}
-          {activeTenor && crosshairX > margin.left && (
+          {activeTenor && crosshairX >= margin.left && (
             <g>
               <line
                 x1={crosshairX - margin.left}

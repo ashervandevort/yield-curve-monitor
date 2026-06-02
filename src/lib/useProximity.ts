@@ -1,36 +1,31 @@
 /**
  * Proximity-based tenor detection for yield curve charts.
- *
- * Instead of requiring the cursor to be near a data point, the hook
- * snaps to the nearest tenor column by X-coordinate.  This makes
- * exploration feel effortless – just move left/right.
  */
 import { useState, useCallback } from 'react'
 
 export interface ProximityPoint {
   tenor: string
-  x: number      // pixel position (after margins) relative to the SVG origin
+  x: number
 }
 
-export interface ProximityState {
-  activeTenor: string | null
-  crosshairX: number          // px from left edge (including margin)
-  rawY: number                // raw mouse Y (for tooltip placement)
+export interface ProximityHit {
+  activeTenor: string
+  crosshairX: number
+  rawY: number
 }
 
-const EMPTY: ProximityState = { activeTenor: null, crosshairX: 0, rawY: 0 }
+const EMPTY = { activeTenor: null as string | null, crosshairX: 0, rawY: 0 }
 
 export function useProximity(points: ProximityPoint[], leftMargin = 0) {
-  const [state, setState] = useState<ProximityState>(EMPTY)
+  const [state, setState] = useState(EMPTY)
 
-  const handleMouseMove = useCallback(
-    (event: React.MouseEvent<SVGElement>) => {
-      if (!points.length) return
+  const resolveNearest = useCallback(
+    (event: React.MouseEvent<SVGElement>): ProximityHit | null => {
+      if (!points.length) return null
       const rect = event.currentTarget.getBoundingClientRect()
       const mouseX = event.clientX - rect.left
       const mouseY = event.clientY - rect.top
 
-      // Find nearest tenor by x-distance
       let nearest = points[0]
       let minDist = Infinity
       for (const pt of points) {
@@ -41,18 +36,32 @@ export function useProximity(points: ProximityPoint[], leftMargin = 0) {
         }
       }
 
-      setState({
+      return {
         activeTenor: nearest.tenor,
         crosshairX: nearest.x + leftMargin,
         rawY: mouseY,
-      })
+      }
     },
     [points, leftMargin],
+  )
+
+  const handleMouseMove = useCallback(
+    (event: React.MouseEvent<SVGElement>) => {
+      const hit = resolveNearest(event)
+      if (hit) {
+        setState({
+          activeTenor: hit.activeTenor,
+          crosshairX: hit.crosshairX,
+          rawY: hit.rawY,
+        })
+      }
+    },
+    [resolveNearest],
   )
 
   const handleMouseLeave = useCallback(() => {
     setState(EMPTY)
   }, [])
 
-  return { ...state, handleMouseMove, handleMouseLeave }
+  return { ...state, handleMouseMove, handleMouseLeave, resolveNearest }
 }

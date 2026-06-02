@@ -15,8 +15,8 @@ from .market_calendar import market_by_date, market_days_in_range
 MIN_RELEASE_GAP_DAYS = 7
 MACRO_SYNC_MAX_AGE_HOURS = settings.MACRO_SYNC_MAX_AGE_HOURS
 FRED_OVERLAP_DAYS = 5
-FRED_BOOTSTRAP_DAYS = 730
-SCHEDULED_HORIZON_DAYS = 365
+FRED_BOOTSTRAP_DAYS = 90
+SCHEDULED_HORIZON_DAYS = 120
 
 # Verified via FRED /release — stable release IDs
 MACRO_RELEASES: dict[str, dict[str, Any]] = {
@@ -228,13 +228,16 @@ class MacroCalendarClient:
         today = datetime.now().date()
         end_s = today.strftime('%Y-%m-%d')
 
-        if full_backfill or not macro_store.max_fred_date(release_key):
+        if full_backfill:
+            start = today - timedelta(days=730)
+        elif not macro_store.max_fred_date(release_key):
             start = today - timedelta(days=FRED_BOOTSTRAP_DAYS)
+        else:
+            max_date = macro_store.max_fred_date(release_key)
+            assert max_date is not None
+            start = _parse_date(max_date) - timedelta(days=FRED_OVERLAP_DAYS)
             return start.strftime('%Y-%m-%d'), end_s
 
-        max_date = macro_store.max_fred_date(release_key)
-        assert max_date is not None
-        start = _parse_date(max_date) - timedelta(days=FRED_OVERLAP_DAYS)
         return start.strftime('%Y-%m-%d'), end_s
 
     async def sync_release(
@@ -266,6 +269,7 @@ class MacroCalendarClient:
 
     def sync_scheduled_forward(self) -> int:
         """Persist rule-based forward dates (no FRED)."""
+        macro_store.prune_past_scheduled()
         today = datetime.now().date()
         end = today + timedelta(days=SCHEDULED_HORIZON_DAYS)
         total = 0
@@ -301,22 +305,16 @@ class MacroCalendarClient:
 
     async def ensure_stored(self, *, refresh: bool = False) -> bool:
         """Return True if a FRED sync ran on this request."""
-        if macro_store.row_count() == 0:
-            await self.sync_all(refresh=True, full_backfill=True)
-            return True
-
         if refresh:
             await self.sync_all(refresh=True)
             return True
 
-        stale = any(
-            (macro_store.sync_age_hours(key) or 9999) > MACRO_SYNC_MAX_AGE_HOURS
-            for key in MACRO_RELEASES
-        )
-        if stale:
-            await self.sync_all(refresh=False)
+        if macro_store.row_count() == 0:
+            await self.sync_all(refresh=True, full_backfill=False)
             return True
 
+        # Calendar reads should not hit FRED — only refresh scheduled forward dates locally.
+        macro_store.prune_past_scheduled()
         self.sync_scheduled_forward()
         return False
 
@@ -334,7 +332,7 @@ class MacroCalendarClient:
 
         events: list[dict[str, Any]] = []
         for key, meta in MACRO_RELEASES.items():
-            stored_dates = _cap_one_per_month(macro_store.get_dates(key, start_s, end_s))
+            stored_dates = macro_store.resolve_dates_for_calendar(key, start_s, end_s)
             for date_str in stored_dates:
                 source = macro_store.get_source(key, date_str) or 'scheduled'
                 events.append(_event_fields(key, meta, date_str, source))
@@ -365,7 +363,7 @@ class MacroCalendarClient:
             'market_days': market_days,
             'market_by_date': market_map,
             'count': len(events),
-            'data_version': 4,
+            'data_version': 5,
             'storage': 'sqlite',
             'storage_status': 'synced' if synced_now else 'stored',
             'stored_rows': macro_store.row_count(),
