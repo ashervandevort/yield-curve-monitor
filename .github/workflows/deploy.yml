@@ -19,6 +19,7 @@ jobs:
       env:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         HOST: ${{ secrets.HOSTINGER_HOST }}
+        USER: ${{ secrets.HOSTINGER_USER }}
       run: |
         set -e
         mkdir -p ~/.ssh
@@ -26,14 +27,41 @@ jobs:
         # Write key exactly — avoids appleboy passphrase / formatting issues
         printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
         chmod 600 ~/.ssh/deploy_key
+
+        # Fail fast on malformed key (would show Permission denied, not timeout)
+        ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null
+
         ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-        # Verify key parses and authenticates before rsync
-        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
-          ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }} 'echo SSH OK'
+
+        echo "Preflight TCP to ${HOST}:22 ..."
+        if ! nc -zv -w 15 "$HOST" 22; then
+          echo "ERROR: Cannot reach ${HOST}:22 from GitHub runner (network/firewall)."
+          echo "This is NOT a key or passphrase issue — TCP never connected."
+          exit 1
+        fi
+
+        echo "Testing SSH auth (BatchMode, no passphrase prompt) ..."
+        for attempt in 1 2 3; do
+          if ssh -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=10 \
+            -o ServerAliveCountMax=3 \
+            "$USER@$HOST" 'echo SSH OK'; then
+            echo "SSH authenticated on attempt ${attempt}"
+            exit 0
+          fi
+          echo "SSH attempt ${attempt} failed — retrying in 15s ..."
+          sleep 15
+        done
+        echo "ERROR: TCP reached port 22 but SSH auth failed."
+        echo "Check SSH_PRIVATE_KEY matches ~/.ssh/github_deploy_dec2025 (no passphrase)."
+        exit 1
 
     - name: Create temp directory on VPS
       run: |
-        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=30 \
           ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }} << EOF
         DEPLOY_PATH="/var/www/yield-curve"
         TEMP_PATH="\${DEPLOY_PATH}_${{ env.DEPLOY_TIMESTAMP }}"
@@ -44,6 +72,7 @@ jobs:
     - name: Sync files
       run: |
         rsync -avz --delete \
+          -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=30" \
           --exclude='.git' --exclude='node_modules' --exclude='.next' \
           --exclude='backend/venv' --exclude='backend/.pytest_cache' \
           --exclude='backend/app/data/*.sqlite' \
@@ -62,7 +91,7 @@ jobs:
         GITHUB_RUN_ID: ${{ github.run_id }}
         GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
       run: |
-        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=30 \
           ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }} \
           "FRED_API_KEY='$FRED_API_KEY' DB_HOST='$DB_HOST' DB_PORT='$DB_PORT' DB_NAME='$DB_NAME' DB_USER='$DB_USER' DB_PASSWORD='$DB_PASSWORD' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' DEPLOY_TIMESTAMP='${{ env.DEPLOY_TIMESTAMP }}' bash -s" << 'REMOTE'
         set -e
