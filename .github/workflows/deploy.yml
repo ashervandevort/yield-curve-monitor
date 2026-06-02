@@ -189,6 +189,9 @@ jobs:
         python scripts/migrate_sqlite_to_pg.py || echo "WARN: SQLite migration skipped"
         python scripts/cron/fred_daily.py || echo "WARN: FRED incremental sync skipped"
         python scripts/cron/macro_daily.py || echo "WARN: macro calendar sync skipped"
+        python scripts/cron/futures_daily.py || echo "WARN: futures yfinance sync skipped"
+        FUTURES_FULL_BACKFILL=1 python scripts/cron/futures_daily.py || echo "WARN: futures backfill skipped"
+        python scripts/cron/fomc_daily.py || echo "WARN: FOMC/Polymarket sync skipped"
         deactivate
 
         pm2 delete yield-curve-api 2>/dev/null || true

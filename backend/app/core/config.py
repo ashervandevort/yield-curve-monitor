@@ -46,7 +46,10 @@ class Settings:
         '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y'
     ]
 
-    # Futures-chart tenors (for the "futures curve" view in the monitor)
+    # Futures-chart symbols (distinct CME contracts via yfinance)
+    FUTURES_SYMBOLS: list[str] = ['ZT', 'ZF', 'ZN', 'TN', 'ZB', 'UB']
+
+    # Legacy tenor buckets (FRED proxy — superseded by FUTURES_SYMBOLS)
     FUTURES_TENORS: list[str] = ['2Y', '5Y', '10Y', '30Y']
 
     # Key-rate DV01 tenors used by the hedge optimizer (7-point grid)

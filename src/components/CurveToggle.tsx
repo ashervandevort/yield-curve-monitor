@@ -10,7 +10,7 @@ interface CurveToggleProps {
 
 const OPTIONS: { id: CurveType; label: string; hint: string }[] = [
   { id: 'full', label: 'Spot', hint: 'FRED CMT · 11 tenors' },
-  { id: 'futures', label: 'Futures', hint: 'ZT–UB CTD yields' },
+  { id: 'futures', label: 'Futures', hint: 'yfinance · CTD-implied yields' },
 ]
 
 export default function CurveToggle({ value, onChange }: CurveToggleProps) {

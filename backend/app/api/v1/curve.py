@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from ...core import fred_client, settings
+from ...core import futures_client
 from ...core.curve_store import curve_store
 from ...core.spreads import (
     SPREAD_DESCRIPTIONS,
@@ -21,12 +22,24 @@ VALID_WINDOWS = {'1D', '1W', '1M', '3M', '6M', '1Y'}
 
 
 def parse_tenors(tenors: Optional[str], curve_type: str) -> list[str]:
-    """Parse and validate requested tenors."""
+    """Parse and validate requested tenors or futures symbols."""
+    if curve_type == 'futures':
+        valid = set(settings.FUTURES_SYMBOLS)
+        if tenors:
+            key_list = [t.strip().upper() for t in tenors.split(',') if t.strip()]
+        else:
+            key_list = settings.FUTURES_SYMBOLS
+        invalid = [k for k in key_list if k not in valid]
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid futures symbol(s): {invalid}. Valid: {settings.FUTURES_SYMBOLS}",
+            )
+        return key_list
+
     valid_tenors = set(settings.FULL_TENORS)
     if tenors:
         tenor_list = [t.strip().upper() for t in tenors.split(',') if t.strip()]
-    elif curve_type == 'futures':
-        tenor_list = settings.FUTURES_TENORS
     elif curve_type == 'full':
         tenor_list = settings.FULL_TENORS
     else:
@@ -90,7 +103,10 @@ async def get_latest_curve(
     tenor_list = parse_tenors(tenors, curve_type)
     
     try:
-        result = await fred_client.get_yield_curve(tenors=tenor_list, refresh=refresh)
+        if curve_type == 'futures':
+            result = await futures_client.get_futures_curve(symbols=tenor_list)
+        else:
+            result = await fred_client.get_yield_curve(tenors=tenor_list, refresh=refresh)
         
         if not result['yields']:
             raise HTTPException(status_code=404, detail="No yield data available")
@@ -166,7 +182,10 @@ async def get_curve_changes(
     tenor_list = parse_tenors(tenors, curve_type)
     
     try:
-        changes = await fred_client.fetch_curve_changes(window_list, tenor_list)
+        if curve_type == 'futures':
+            changes = await futures_client.get_futures_changes(window_list, tenor_list)
+        else:
+            changes = await fred_client.fetch_curve_changes(window_list, tenor_list)
         
         if not changes:
             raise HTTPException(status_code=404, detail="No change data available")

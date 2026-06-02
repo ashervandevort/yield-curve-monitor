@@ -18,5 +18,8 @@ sqlalchemy>=2.0.25
 # HTTP client for FRED API
 httpx>=0.27.0
 
+# Treasury futures (Yahoo Finance)
+yfinance>=0.2.40
+
 # Date handling
 python-dateutil>=2.9.0

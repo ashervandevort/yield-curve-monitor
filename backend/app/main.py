@@ -5,7 +5,7 @@ from fastapi import Request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.v1 import curve, hedge, macro
+from .api.v1 import curve, hedge, macro, fomc, futures
 from .core import settings
 
 app = FastAPI(
@@ -32,6 +32,8 @@ app.add_middleware(
 app.include_router(curve.router, prefix="/api/v1")
 app.include_router(hedge.router, prefix="/api/v1")
 app.include_router(macro.router, prefix="/api/v1")
+app.include_router(fomc.router, prefix="/api/v1")
+app.include_router(futures.router, prefix="/api/v1")
 
 
 @app.middleware("http")
@@ -53,6 +55,8 @@ async def root():
         "endpoints": {
             "curve": "/api/v1/curve",
             "macro": "/api/v1/macro",
+            "fomc": "/api/v1/fomc",
+            "futures": "/api/v1/futures",
             "hedge": "/api/v1/hedge",
             "docs": "/docs",
         }

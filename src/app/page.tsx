@@ -18,8 +18,13 @@ import {
   MacroCalendar,
   CurveWriteUpPanel,
   YieldContextPanel,
-  FuturesCurveHelp,
+  FomcPanel,
 } from '@/components'
+import {
+  FUTURES_CURVE_SUBTITLE,
+  FUTURES_HEATMAP_NOTE,
+  FUTURES_SNAPSHOT_FOOTER,
+} from '@/lib/futuresPanelCopy'
 import { ShareLinks } from '@/components/ShareButton'
 import {
   CurveType,
@@ -40,7 +45,7 @@ type SpreadsWithRegime = SpreadsData & {
   regime?: { level: number; slope: number; curvature: number; label: string }
 }
 
-type TabId = 'monitor' | 'hedge' | 'macro'
+type TabId = 'monitor' | 'hedge' | 'macro' | 'fomc'
 
 /** Page auto-refresh — hits our API (SQLite cache), not FRED on every tick */
 const AUTO_REFRESH_MS = 5 * 60 * 1000
@@ -146,11 +151,11 @@ export default function Home() {
   const chartData: CurveChartData[] = useMemo(() => {
     if (!latestCurve) return []
     if (curveType === 'futures') {
-      return FUTURES_CONTRACTS.filter((c) => latestCurve.yields[c.tenor] !== undefined).map(
+      return FUTURES_CONTRACTS.filter((c) => latestCurve.yields[c.symbol] !== undefined).map(
         (c) => ({
           tenor: c.symbol,
           tenorNumeric: tenorToYears[c.tenor],
-          yield: latestCurve.yields[c.tenor],
+          yield: latestCurve.yields[c.symbol],
           label: c.symbol,
         }),
       )
@@ -167,8 +172,8 @@ export default function Home() {
     if (!latestCurve || !changesData || selectedSpreads.length > 0) return []
     const keys =
       curveType === 'futures'
-        ? FUTURES_CONTRACTS.map((c) => ({ label: c.symbol, tenor: c.tenor }))
-        : TENOR_ORDER.map((t) => ({ label: t, tenor: t }))
+        ? FUTURES_CONTRACTS.map((c) => ({ label: c.symbol, key: c.symbol }))
+        : TENOR_ORDER.map((t) => ({ label: t, key: t }))
     return selectedOverlays
       .filter((id) => changesData[id])
       .map((id) => {
@@ -178,11 +183,11 @@ export default function Home() {
           label: `${id} ago`,
           color: CURVE_COLORS[id as keyof typeof CURVE_COLORS] || '#888',
           data: keys
-            .filter(({ tenor }) => latestCurve.yields[tenor] !== undefined && wd.changes[tenor] !== undefined)
-            .map(({ label, tenor }) => ({
+            .filter(({ key }) => latestCurve.yields[key] !== undefined && wd.changes[key] !== undefined)
+            .map(({ label, key }) => ({
               tenor: label,
-              tenorNumeric: tenorToYears[tenor],
-              yield: latestCurve.yields[tenor] - wd.changes[tenor] / 100,
+              tenorNumeric: tenorToYears[curveType === 'futures' ? FUTURES_CONTRACTS.find((c) => c.symbol === key)!.tenor : key],
+              yield: latestCurve.yields[key] - wd.changes[key] / 100,
               label,
             })),
         }
@@ -211,13 +216,17 @@ export default function Home() {
     selectedSpreads.length > 0
       ? `Spread History · ${selectedSpreads.join(', ')}`
       : curveType === 'futures'
-        ? 'Treasury Futures Curve (CTD yields)'
+        ? 'Treasury Futures Curve'
         : 'Treasury Yield Curve'
+
+  const chartSubtitle =
+    selectedSpreads.length > 0 || curveType !== 'futures' ? null : FUTURES_CURVE_SUBTITLE
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'monitor', label: 'Curve Monitor' },
     { id: 'hedge', label: 'Hedge Optimizer' },
     { id: 'macro', label: 'Macro Calendar' },
+    { id: 'fomc', label: 'FOMC' },
   ]
 
   return (
@@ -254,13 +263,8 @@ export default function Home() {
             ))}
           </div>
           {activeTab === 'monitor' && (
-            <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
+            <div className="flex justify-center w-full sm:w-auto">
               <CurveToggle value={curveType} onChange={setCurveType} />
-              {curveType === 'futures' && (
-                <div className="w-full max-w-4xl">
-                  <FuturesCurveHelp />
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -278,7 +282,14 @@ export default function Home() {
                 <div className="xl:col-span-8 space-y-3 min-w-0">
                   <div className="panel">
                     <div className="panel-header flex-col sm:flex-row items-center gap-2">
-                      <span className="panel-title">{chartTitle}</span>
+                      <div className="flex flex-col items-center sm:items-start gap-0.5">
+                        <span className="panel-title">{chartTitle}</span>
+                        {chartSubtitle && (
+                          <span className="font-mono text-[9px] text-center sm:text-left" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                            {chartSubtitle}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
                         {selectedSpreads.length === 0 && (
                           <OverlaySelector selected={selectedOverlays} onChange={setSelectedOverlays} />
@@ -325,10 +336,13 @@ export default function Home() {
                   </div>
 
                   <div className="panel">
-                    <div className="panel-header">
+                    <div className="panel-header flex-col sm:flex-row gap-1">
                       <span className="panel-title">Yield Changes (bp)</span>
                       <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
                         {latestCurve?.date ?? '—'}
+                        {curveType === 'futures' && (
+                          <span className="hidden lg:inline"> · {FUTURES_HEATMAP_NOTE}</span>
+                        )}
                       </span>
                     </div>
                     <div className="p-2 w-full">
@@ -367,20 +381,35 @@ export default function Home() {
                             {(curveType === 'futures'
                               ? FUTURES_CONTRACTS
                               : [
-                                  { symbol: '2Y', tenor: '2Y' },
-                                  { symbol: '5Y', tenor: '5Y' },
-                                  { symbol: '10Y', tenor: '10Y' },
-                                  { symbol: '20Y', tenor: '20Y' },
-                                  { symbol: '30Y', tenor: '30Y' },
+                                  { symbol: '2Y', name: '2-Year', tenor: '2Y', targetLabel: '' },
+                                  { symbol: '5Y', name: '5-Year', tenor: '5Y', targetLabel: '' },
+                                  { symbol: '10Y', name: '10-Year', tenor: '10Y', targetLabel: '' },
+                                  { symbol: '20Y', name: '20-Year', tenor: '20Y', targetLabel: '' },
+                                  { symbol: '30Y', name: '30-Year', tenor: '30Y', targetLabel: '' },
                                 ]
-                            ).map(({ symbol, tenor }) => (
-                              <div key={symbol} className="stat-row">
-                                <span className="tenor-label text-[10px]">{symbol}</span>
-                                <span className="font-mono font-semibold text-sm" style={{ color: '#00cccc' }}>
-                                  {latestCurve.yields[tenor]?.toFixed(3) ?? '—'}%
+                            ).map((row) => (
+                              <div key={row.symbol} className="stat-row">
+                                <span className="min-w-0">
+                                  <span className="tenor-label text-[10px]">{row.symbol}</span>
+                                  {curveType === 'futures' && (
+                                    <span className="block font-mono text-[8px] truncate" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                                      {row.name} · {row.targetLabel}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="font-mono font-semibold text-sm shrink-0" style={{ color: '#00cccc' }}>
+                                  {latestCurve.yields[row.tenor]?.toFixed(3) ?? '—'}%
                                 </span>
                               </div>
                             ))}
+                            {curveType === 'futures' && (
+                              <>
+                                <div className="divider-h my-2" />
+                                <p className="font-mono text-[8px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                                  {FUTURES_SNAPSHOT_FOOTER}
+                                </p>
+                              </>
+                            )}
                             <div className="divider-h my-2" />
                             <div className="stat-row">
                               <span className="stat-label">DATA DATE</span>
@@ -482,6 +511,18 @@ export default function Home() {
               transition={{ duration: 0.15 }}
             >
               <MacroCalendar days={45} />
+            </motion.div>
+          )}
+
+          {activeTab === 'fomc' && (
+            <motion.div
+              key="fomc"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.15 }}
+            >
+              <FomcPanel />
             </motion.div>
           )}
         </AnimatePresence>
