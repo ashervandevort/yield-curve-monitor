@@ -35,12 +35,24 @@ Treasury yield curve monitor and DV01 hedge optimizer — built for desks, famil
 |-------|--------|
 | Frontend | Next.js 16, TypeScript, visx, Framer Motion, Tailwind CSS 4 |
 | Backend | FastAPI, scipy (L-BFGS-B + integer rounding) |
-| Data | FRED API (DGS series), SQLite cache |
-| Deploy | GitHub Actions → Hostinger VPS, PM2, Nginx |
+| Data | FRED API (spot), Yahoo Finance (futures), Polymarket (FOMC odds), SQLite + PostgreSQL cache |
+| Deploy | GitHub Actions → Hostinger VPS, PM2, Nginx, weekday cron on VPS |
 
-**External API:** FRED only (`FRED_API_KEY`). No market data vendor required.
+**External APIs:** FRED (`FRED_API_KEY`), Yahoo Finance (futures), Polymarket Gamma (FOMC — no key).
 
-PostgreSQL schema exists for optional historical persistence; production uses SQLite cache by default.
+Production spot curve uses **PostgreSQL**; futures/FOMC/macro snapshots use **SQLite** on the release path. Local dev uses SQLite only.
+
+### When does data update?
+
+| Source | Typical lag | VPS cron (UTC, Mon–Fri) |
+|--------|-------------|-------------------------|
+| FRED spot yields | Same business day after ~4:15 PM ET | 23:00 |
+| Yahoo futures | Same day after cash close | 23:30 |
+| Polymarket FOMC | Intraday (stored on cron + page cache) | 23:45 |
+
+Midday refresh shows the **last cron run** (often prior calendar day before ~7 PM ET). Not T+1 — evening cron picks up that day's close. Page auto-refresh reads cache only; it does not hit FRED on every tick.
+
+Deploy runs incremental sync scripts but **does not** re-migrate SQLite→PG unless `MIGRATE_SQLITE_TO_PG=1` is set on the workflow.
 
 ---
 
@@ -95,7 +107,9 @@ Base: `http://localhost:8053/api/v1` (proxied via Next.js `/api/*` in production
 | `GET /curve/latest` | Latest yield curve |
 | `GET /curve/changes` | BP changes by window |
 | `GET /curve/spreads` | Key spreads + regime |
-| `GET /curve/history` | Historical series |
+| `GET /curve/history` | Historical series (spot or `curve_type=futures`) |
+| `GET /fomc/snapshot` | FOMC countdown, Polymarket odds, FRED target range |
+| `GET /futures/ctd` | CTD + conversion factor metadata |
 | `POST /hedge/optimize` | Optimize futures hedge |
 | `GET /hedge/instruments` | Contract specs + KRD profiles |
 | `GET /hedge/tenors` | 7-point key-rate grid |

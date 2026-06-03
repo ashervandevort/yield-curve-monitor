@@ -137,6 +137,20 @@ async def get_curve_history(
     tenor_list = parse_tenors(tenors, curve_type)
     
     try:
+        if curve_type == 'futures':
+            data = futures_client.futures_history_rows(start_date, end_date, tenor_list)
+            if not data:
+                raise HTTPException(status_code=404, detail="No futures history for specified range")
+            return {
+                'success': True,
+                'data': data,
+                'tenors': tenor_list,
+                'start_date': start_date,
+                'end_date': end_date,
+                'count': len(data),
+                'curve_type': 'futures',
+            }
+
         df = await fred_client.fetch_curve_history(start_date, end_date, tenor_list)
         
         if df.empty:

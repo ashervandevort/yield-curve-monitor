@@ -19,10 +19,13 @@ import {
   CurveWriteUpPanel,
   YieldContextPanel,
   FomcPanel,
+  InfoTip,
 } from '@/components'
 import {
-  FUTURES_CURVE_SUBTITLE,
-  FUTURES_HEATMAP_NOTE,
+  FUTURES_CURVE_DETAIL,
+  FUTURES_CURVE_SHORT,
+  FUTURES_HEATMAP_DETAIL,
+  FUTURES_HEATMAP_SHORT,
   FUTURES_SNAPSHOT_FOOTER,
 } from '@/lib/futuresPanelCopy'
 import { ShareLinks } from '@/components/ShareButton'
@@ -220,7 +223,10 @@ export default function Home() {
         : 'Treasury Yield Curve'
 
   const chartSubtitle =
-    selectedSpreads.length > 0 || curveType !== 'futures' ? null : FUTURES_CURVE_SUBTITLE
+    selectedSpreads.length > 0 || curveType !== 'futures' ? null : FUTURES_CURVE_SHORT
+
+  const chartSubtitleDetail =
+    selectedSpreads.length > 0 || curveType !== 'futures' ? null : FUTURES_CURVE_DETAIL
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'monitor', label: 'Curve Monitor' },
@@ -284,10 +290,8 @@ export default function Home() {
                     <div className="panel-header flex-col sm:flex-row items-center gap-2">
                       <div className="flex flex-col items-center sm:items-start gap-0.5">
                         <span className="panel-title">{chartTitle}</span>
-                        {chartSubtitle && (
-                          <span className="font-mono text-[9px] text-center sm:text-left" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                            {chartSubtitle}
-                          </span>
+                        {chartSubtitle && chartSubtitleDetail && (
+                          <InfoTip label={chartSubtitle}>{chartSubtitleDetail}</InfoTip>
                         )}
                       </div>
                       <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
@@ -337,12 +341,14 @@ export default function Home() {
 
                   <div className="panel">
                     <div className="panel-header flex-col sm:flex-row gap-1">
-                      <span className="panel-title">Yield Changes (bp)</span>
+                      <span className="panel-title flex items-center gap-2 flex-wrap">
+                        Yield Changes (bp)
+                        {curveType === 'futures' && (
+                          <InfoTip label={FUTURES_HEATMAP_SHORT}>{FUTURES_HEATMAP_DETAIL}</InfoTip>
+                        )}
+                      </span>
                       <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
                         {latestCurve?.date ?? '—'}
-                        {curveType === 'futures' && (
-                          <span className="hidden lg:inline"> · {FUTURES_HEATMAP_NOTE}</span>
-                        )}
                       </span>
                     </div>
                     <div className="p-2 w-full">
@@ -453,7 +459,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <YieldContextPanel curve={latestCurve} loading={loading && !latestCurve} />
+                  <YieldContextPanel curve={latestCurve} curveType={curveType} loading={loading && !latestCurve} />
                 </div>
 
                 <div className="xl:col-span-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3 content-start">

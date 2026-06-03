@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { YieldCurve } from '@/types'
+import { CurveType, YieldCurve } from '@/types'
 import {
   HistoryWindow,
   downsample,
@@ -13,14 +13,17 @@ import {
   subtractDays,
   zScore,
 } from '@/lib/historicalStats'
+import { FUTURES_HISTORICAL_DETAIL } from '@/lib/futuresPanelCopy'
+import InfoTip from './InfoTip'
 
 interface HistoryPoint {
   date: string
-  [tenor: string]: string | number | null
+  [key: string]: string | number | null
 }
 
 interface YieldContextPanelProps {
   curve: YieldCurve | null
+  curveType?: CurveType
   loading?: boolean
 }
 
@@ -30,9 +33,9 @@ const WINDOW_LABEL: Record<HistoryWindow, string> = {
   '5Y': '5-year',
   '10Y': '10-year',
 }
-const FOCUS_TENORS = ['2Y', '10Y', '30Y'] as const
+const SPOT_FOCUS = ['2Y', '10Y', '30Y'] as const
+const FUTURES_FOCUS = ['ZT', 'ZN', 'ZB'] as const
 
-/** Yield level time series — line + end dot colored by current percentile rank */
 function YieldSparkline({
   values,
   percentile,
@@ -96,19 +99,27 @@ function PercentileStrip({ percentile }: { percentile: number }) {
   )
 }
 
-export default function YieldContextPanel({ curve, loading }: YieldContextPanelProps) {
+export default function YieldContextPanel({
+  curve,
+  curveType = 'full',
+  loading,
+}: YieldContextPanelProps) {
   const [window, setWindow] = useState<HistoryWindow>('5Y')
   const [history, setHistory] = useState<HistoryPoint[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
 
+  const focusKeys = curveType === 'futures' ? [...FUTURES_FOCUS] : [...SPOT_FOCUS]
+
   useEffect(() => {
     if (!curve?.date) return
     const start = subtractDays(curve.date, historyWindowDays(window))
-    const tenors = FOCUS_TENORS.join(',')
+    const keys = focusKeys.join(',')
     setHistoryLoading(true)
     setHistoryError(null)
-    fetch(`/api/curve/history?start_date=${start}&end_date=${curve.date}&tenors=${tenors}`)
+    fetch(
+      `/api/curve/history?start_date=${start}&end_date=${curve.date}&tenors=${keys}&curve_type=${curveType}`,
+    )
       .then((r) => r.json())
       .then((d) => {
         if (d.success && d.data) setHistory(d.data)
@@ -116,27 +127,27 @@ export default function YieldContextPanel({ curve, loading }: YieldContextPanelP
       })
       .catch(() => setHistoryError('Failed to load history'))
       .finally(() => setHistoryLoading(false))
-  }, [curve?.date, window])
+  }, [curve?.date, window, curveType, focusKeys.join(',')])
 
   const tenorStats = useMemo(() => {
     if (!curve) return []
-    return FOCUS_TENORS.map((tenor) => {
-      const current = curve.yields[tenor]
+    return focusKeys.map((key) => {
+      const current = curve.yields[key]
       const series = history
-        .map((p) => p[tenor])
+        .map((p) => p[key])
         .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
       if (current === undefined || !series.length) {
-        return { tenor, current, percentile: NaN, z: NaN, spark: [] as number[] }
+        return { key, current, percentile: NaN, z: NaN, spark: [] as number[] }
       }
       return {
-        tenor,
+        key,
         current,
         percentile: percentileRank(series, current),
         z: zScore(series, current),
         spark: downsample(series),
       }
     })
-  }, [curve, history])
+  }, [curve, history, focusKeys])
 
   if (loading && !curve) {
     return (
@@ -158,7 +169,10 @@ export default function YieldContextPanel({ curve, loading }: YieldContextPanelP
   return (
     <div className="panel">
       <div className="panel-header flex-col sm:flex-row gap-2">
-        <span className="panel-title">Historical Context</span>
+        <div className="flex items-center gap-2">
+          <span className="panel-title">Historical Context</span>
+          {curveType === 'futures' && <InfoTip>{FUTURES_HISTORICAL_DETAIL}</InfoTip>}
+        </div>
         <div className="flex items-center gap-1">
           {WINDOWS.map((w) => (
             <button
@@ -192,7 +206,7 @@ export default function YieldContextPanel({ curve, loading }: YieldContextPanelP
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {tenorStats.map((s, i) => (
               <motion.div
-                key={s.tenor}
+                key={s.key}
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
@@ -200,7 +214,7 @@ export default function YieldContextPanel({ curve, loading }: YieldContextPanelP
                 style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="tenor-label text-[10px]">{s.tenor}</span>
+                  <span className="tenor-label text-[10px]">{s.key}</span>
                   <span className="font-mono text-sm font-semibold" style={{ color: '#00cccc' }}>
                     {s.current?.toFixed(2)}%
                   </span>
@@ -224,10 +238,9 @@ export default function YieldContextPanel({ curve, loading }: YieldContextPanelP
             ))}
           </div>
         )}
-        {!historyLoading && !historyError && (
+        {!historyLoading && !historyError && curveType === 'full' && (
           <p className="font-mono text-[9px] mt-3 text-center sm:text-left" style={{ color: 'rgba(255,255,255,0.35)' }}>
-            Sparklines plot yield levels over the selected {WINDOW_LABEL[window]} lookback. Dot color and the bar
-            below show where today&apos;s rate ranks (0th–100th percentile) within that history.
+            Sparklines plot FRED CMT yield levels. Dot color and bar show where today ranks vs the selected window.
           </p>
         )}
       </div>

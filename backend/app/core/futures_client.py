@@ -186,6 +186,28 @@ async def get_futures_changes(
     return changes
 
 
+def futures_history_rows(
+    start_date: str,
+    end_date: str,
+    symbols: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    """Daily implied-yield rows keyed by symbol for historical context API."""
+    symbols = symbols or FUTURES_SYMBOLS
+    hist = futures_store.history(start_date, end_date, symbols, field='implied_yield')
+    all_dates: set[str] = set()
+    for series in hist.values():
+        for pt in series:
+            all_dates.add(pt['date'])
+    rows: list[dict[str, Any]] = []
+    for d in sorted(all_dates):
+        row: dict[str, Any] = {'date': d}
+        for sym in symbols:
+            pt = next((p for p in hist.get(sym, []) if p['date'] == d), None)
+            row[sym] = pt['value'] if pt else None
+        rows.append(row)
+    return rows
+
+
 def ff_implied_from_zq() -> Optional[float]:
     """30-day Fed Funds futures (ZQ=F): implied rate ≈ 100 - price."""
     yf = _import_yfinance()

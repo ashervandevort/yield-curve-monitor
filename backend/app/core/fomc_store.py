@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -118,6 +118,42 @@ class FomcStore:
         if 'meeting_outlook_json' in out:
             del out['meeting_outlook_json']
         return out
+
+    def prior_probabilities(
+        self,
+        meeting_date: str,
+        hours: float = 24,
+    ) -> Optional[dict[str, float]]:
+        """Probabilities from the latest snapshot at least `hours` ago."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT probabilities_json FROM fomc_probability_snapshots
+                WHERE meeting_date = ? AND fetched_at <= ?
+                ORDER BY fetched_at DESC
+                LIMIT 1
+                """,
+                (meeting_date, cutoff.isoformat()),
+            ).fetchone()
+        if not row:
+            return None
+        return json.loads(row['probabilities_json'])
+
+    def probability_deltas(
+        self,
+        meeting_date: str,
+        current: dict[str, float],
+        hours: float = 24,
+    ) -> dict[str, float]:
+        prior = self.prior_probabilities(meeting_date, hours)
+        if not prior:
+            return {}
+        keys = ('cut_25bp', 'hold', 'hike_25bp')
+        return {
+            k: round((current.get(k, 0) - prior.get(k, 0)) * 100, 1)
+            for k in keys
+        }
 
 
 fomc_store = FomcStore()

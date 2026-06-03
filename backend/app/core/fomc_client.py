@@ -181,6 +181,21 @@ async def build_fomc_snapshot(refresh: bool = False) -> dict[str, Any]:
     return _snapshot_response(meeting, row)
 
 
+def _enrich_outlook_deltas(outlook: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for row in outlook:
+        item = dict(row)
+        probs = item.get('probabilities') or {}
+        if probs and not item.get('unavailable'):
+            item['probability_delta_1d'] = fomc_store.probability_deltas(
+                item['meeting_date'], probs, hours=24
+            )
+        else:
+            item['probability_delta_1d'] = {}
+        enriched.append(item)
+    return enriched
+
+
 def _snapshot_response(meeting: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
     target = {
         'lower': row.get('target_lower'),
@@ -209,6 +224,11 @@ def _snapshot_response(meeting: dict[str, Any], row: dict[str, Any]) -> dict[str
         'probability_note': note,
         'polymarket_url': row.get('polymarket_url'),
         'event_slug': row.get('event_slug'),
-        'meeting_outlook': row.get('meeting_outlook') or [],
+        'meeting_outlook': _enrich_outlook_deltas(row.get('meeting_outlook') or []),
+        'probability_delta_1d': fomc_store.probability_deltas(
+            meeting['date'],
+            row.get('probabilities') or {},
+            hours=24,
+        ),
         'meetings': list(FOMC_MEETING_DATES),
     }

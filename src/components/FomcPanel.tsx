@@ -10,6 +10,7 @@ interface MeetingOutlook {
   event_slug?: string | null
   unavailable?: boolean
   probabilities: Record<string, number>
+  probability_delta_1d?: Record<string, number>
 }
 
 interface FomcSnapshot {
@@ -29,6 +30,7 @@ interface FomcSnapshot {
   probability_note: string
   polymarket_url?: string | null
   meeting_outlook?: MeetingOutlook[]
+  probability_delta_1d?: Record<string, number>
 }
 
 const OUTCOME_ROWS = [
@@ -57,6 +59,22 @@ function CountdownBlock({ value, label }: { value: number; label: string }) {
 function formatMeetingLabel(iso: string) {
   const d = new Date(`${iso}T12:00:00`)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatDeltaPp(delta?: number) {
+  if (delta === undefined || !Number.isFinite(delta) || Math.abs(delta) < 0.05) return null
+  const sign = delta > 0 ? '+' : ''
+  return `${sign}${delta.toFixed(0)}pp 24h`
+}
+
+function DeltaSubscript({ delta, color }: { delta?: number; color: string }) {
+  const text = formatDeltaPp(delta)
+  if (!text) return null
+  return (
+    <span className="font-mono text-[8px] ml-1 tabular-nums" style={{ color: 'rgba(255,255,255,0.4)' }}>
+      <span style={{ color }}>{text}</span>
+    </span>
+  )
 }
 
 function MeetingOutlookCard({ meeting }: { meeting: MeetingOutlook }) {
@@ -100,7 +118,10 @@ function MeetingOutlookCard({ meeting }: { meeting: MeetingOutlook }) {
             <div key={key}>
               <div className="flex justify-between font-mono text-[9px] mb-0.5">
                 <span style={{ color: 'rgba(255,255,255,0.45)' }}>{outcomeLabel}</span>
-                <span className="tabular-nums font-semibold" style={{ color }}>{pct.toFixed(0)}%</span>
+                <span className="tabular-nums font-semibold" style={{ color }}>
+                  {pct.toFixed(0)}%
+                  <DeltaSubscript delta={meeting.probability_delta_1d?.[key]} color={color} />
+                </span>
               </div>
               <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
                 <motion.div
@@ -141,11 +162,13 @@ function MeetingComparisonGrid({ outlook }: { outlook: MeetingOutlook[] }) {
 
 function ProbabilityBars({
   probabilities,
+  deltas,
   source,
   note,
   polymarketUrl,
 }: {
   probabilities: Record<string, number>
+  deltas?: Record<string, number>
   source: string
   note: string
   polymarketUrl?: string | null
@@ -163,7 +186,10 @@ function ProbabilityBars({
             <div key={key}>
               <div className="flex justify-between font-mono text-[10px] mb-1">
                 <span style={{ color: 'rgba(255,255,255,0.55)' }}>{label}</span>
-                <span style={{ color }}>{pct.toFixed(0)}%</span>
+                <span style={{ color }}>
+                  {pct.toFixed(0)}%
+                  <DeltaSubscript delta={deltas?.[key]} color={color} />
+                </span>
               </div>
               <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
                 <motion.div
@@ -303,6 +329,7 @@ export default function FomcPanel() {
 
         <ProbabilityBars
           probabilities={data.probabilities}
+          deltas={data.probability_delta_1d}
           source={data.probability_source}
           note={data.probability_note}
           polymarketUrl={data.polymarket_url}
