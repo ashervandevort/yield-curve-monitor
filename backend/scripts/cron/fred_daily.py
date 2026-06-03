@@ -10,7 +10,7 @@ Full 730-day backfill (migration only):
   FRED_FULL_BACKFILL=1 python scripts/cron/fred_daily.py
 
 Cron (deploy252 — installed via scripts/cron/install_crontab.sh on deploy):
-  0 23 * * 1-5  → fred_daily.py   (~6:00 PM ET)
+  30 22 * * 1-5  → fred_daily.py   (~6:30 PM ET in EDT)
   Logs: ~/logs/yield-curve/fred.log
 """
 from __future__ import annotations

@@ -187,11 +187,12 @@ def _enrich_outlook_deltas(outlook: list[dict[str, Any]]) -> list[dict[str, Any]
         item = dict(row)
         probs = item.get('probabilities') or {}
         if probs and not item.get('unavailable'):
-            item['probability_delta_1d'] = fomc_store.probability_deltas(
-                item['meeting_date'], probs, hours=24
-            )
+            deltas = fomc_store.probability_deltas_multi(item['meeting_date'], probs)
+            item['probability_delta_1d'] = deltas.get('1d', {})
+            item['probability_delta_1w'] = deltas.get('1w', {})
         else:
             item['probability_delta_1d'] = {}
+            item['probability_delta_1w'] = {}
         enriched.append(item)
     return enriched
 
@@ -212,6 +213,10 @@ def _snapshot_response(meeting: dict[str, Any], row: dict[str, Any]) -> dict[str
         if source == 'polymarket'
         else row.get('probability_note') or 'Odds unavailable.'
     )
+    prob_deltas = fomc_store.probability_deltas_multi(
+        meeting['date'],
+        row.get('probabilities') or {},
+    )
     return {
         'next_meeting': meeting,
         'countdown': countdown_to_meeting(meeting),
@@ -225,10 +230,7 @@ def _snapshot_response(meeting: dict[str, Any], row: dict[str, Any]) -> dict[str
         'polymarket_url': row.get('polymarket_url'),
         'event_slug': row.get('event_slug'),
         'meeting_outlook': _enrich_outlook_deltas(row.get('meeting_outlook') or []),
-        'probability_delta_1d': fomc_store.probability_deltas(
-            meeting['date'],
-            row.get('probabilities') or {},
-            hours=24,
-        ),
+        'probability_delta_1d': prob_deltas.get('1d', {}),
+        'probability_delta_1w': prob_deltas.get('1w', {}),
         'meetings': list(FOMC_MEETING_DATES),
     }

@@ -136,9 +136,22 @@ class FomcStore:
                 """,
                 (meeting_date, cutoff.isoformat()),
             ).fetchone()
-        if not row:
-            return None
-        return json.loads(row['probabilities_json'])
+            if row:
+                return json.loads(row['probabilities_json'])
+
+            # Fallback: prior cron row when only ~1 snapshot/day exists
+            rows = conn.execute(
+                """
+                SELECT probabilities_json, fetched_at FROM fomc_probability_snapshots
+                WHERE meeting_date = ?
+                ORDER BY fetched_at DESC
+                LIMIT 2
+                """,
+                (meeting_date,),
+            ).fetchall()
+        if len(rows) >= 2:
+            return json.loads(rows[1]['probabilities_json'])
+        return None
 
     def probability_deltas(
         self,
@@ -153,6 +166,16 @@ class FomcStore:
         return {
             k: round((current.get(k, 0) - prior.get(k, 0)) * 100, 1)
             for k in keys
+        }
+
+    def probability_deltas_multi(
+        self,
+        meeting_date: str,
+        current: dict[str, float],
+    ) -> dict[str, dict[str, float]]:
+        return {
+            '1d': self.probability_deltas(meeting_date, current, hours=24),
+            '1w': self.probability_deltas(meeting_date, current, hours=168),
         }
 
 

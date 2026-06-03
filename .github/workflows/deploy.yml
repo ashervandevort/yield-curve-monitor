@@ -217,6 +217,13 @@ jobs:
           rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
         fi
 
+        for asset in /icon.svg /og-image.svg /manifest.json; do
+          if ! curl --fail --silent --max-time 10 --head "http://127.0.0.1:${FRONTEND_PORT}${asset}" > /dev/null; then
+            echo "Frontend static asset check failed: ${asset}"
+            rollback "$NEW_RELEASE_PATH" "$PREVIOUS"
+          fi
+        done
+
         pm2 save --force
 
         bash "$DEPLOY_PATH/backend/scripts/cron/install_crontab.sh" || echo "WARN: crontab install skipped"

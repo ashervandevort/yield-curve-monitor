@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Install weekday cron jobs for yield-curve data sync (deploy252 VPS).
 #
-# Uses /var/www/yield-curve symlink so jobs survive release swaps.
-# Logs: ~/logs/yield-curve/*.log
-#
-# Manual run on VPS:
-#   bash /var/www/yield-curve/backend/scripts/cron/install_crontab.sh
+# Schedule (~6:30–7:15 PM ET / 22:30–23:15 UTC during EDT):
+#   FRED spot → macro → futures → FOMC/Polymarket (staggered)
+#   Sunday 17:00 UTC → CTD recompute + optional overrides JSON
 set -euo pipefail
 
 DEPLOY_PATH="${DEPLOY_PATH:-/var/www/yield-curve}"
@@ -29,11 +27,13 @@ cron_line() {
 }
 
 NEW_BLOCK=$(cat <<EOF
-# ${MARKER} — weekdays after US close (UTC); staggered to avoid FRED 429 bursts
-$(cron_line "0 23 * * 1-5" "fred_daily.py" "fred.log")
-$(cron_line "15 23 * * 1-5" "macro_daily.py" "macro.log")
-$(cron_line "30 23 * * 1-5" "futures_daily.py" "futures.log")
-$(cron_line "45 23 * * 1-5" "fomc_daily.py" "fomc.log")
+# ${MARKER} — after US cash close (22:30 UTC ≈ 6:30 PM ET in EDT)
+$(cron_line "30 22 * * 1-5" "fred_daily.py" "fred.log")
+$(cron_line "45 22 * * 1-5" "macro_daily.py" "macro.log")
+$(cron_line "0 23 * * 1-5" "futures_daily.py" "futures.log")
+$(cron_line "15 23 * * 1-5" "fomc_daily.py" "fomc.log")
+# ${MARKER} — weekly CTD/conversion-factor recompute (update data/ctd_overrides.json when CME rolls)
+$(cron_line "0 17 * * 0" "ctd_refresh.py --recompute" "ctd.log")
 EOF
 )
 

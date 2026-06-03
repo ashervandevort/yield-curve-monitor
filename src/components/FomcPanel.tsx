@@ -11,6 +11,7 @@ interface MeetingOutlook {
   unavailable?: boolean
   probabilities: Record<string, number>
   probability_delta_1d?: Record<string, number>
+  probability_delta_1w?: Record<string, number>
 }
 
 interface FomcSnapshot {
@@ -31,6 +32,7 @@ interface FomcSnapshot {
   polymarket_url?: string | null
   meeting_outlook?: MeetingOutlook[]
   probability_delta_1d?: Record<string, number>
+  probability_delta_1w?: Record<string, number>
 }
 
 const OUTCOME_ROWS = [
@@ -61,18 +63,29 @@ function formatMeetingLabel(iso: string) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function formatDeltaPp(delta?: number) {
+function formatDeltaPp(delta: number | undefined, period: '24h' | '1w') {
   if (delta === undefined || !Number.isFinite(delta) || Math.abs(delta) < 0.05) return null
   const sign = delta > 0 ? '+' : ''
-  return `${sign}${delta.toFixed(0)}pp 24h`
+  return `${sign}${delta.toFixed(0)}pp ${period}`
 }
 
-function DeltaSubscript({ delta, color }: { delta?: number; color: string }) {
-  const text = formatDeltaPp(delta)
-  if (!text) return null
+function DeltaSubscripts({
+  delta1d,
+  delta1w,
+  color,
+}: {
+  delta1d?: number
+  delta1w?: number
+  color: string
+}) {
+  const d1 = formatDeltaPp(delta1d, '24h')
+  const d7 = formatDeltaPp(delta1w, '1w')
+  if (!d1 && !d7) return null
   return (
-    <span className="font-mono text-[8px] ml-1 tabular-nums" style={{ color: 'rgba(255,255,255,0.4)' }}>
-      <span style={{ color }}>{text}</span>
+    <span className="font-mono text-[8px] ml-1 tabular-nums block sm:inline" style={{ color: 'rgba(255,255,255,0.4)' }}>
+      {d1 && <span style={{ color }}>{d1}</span>}
+      {d1 && d7 && <span className="mx-1">·</span>}
+      {d7 && <span style={{ color }}>{d7}</span>}
     </span>
   )
 }
@@ -120,7 +133,11 @@ function MeetingOutlookCard({ meeting }: { meeting: MeetingOutlook }) {
                 <span style={{ color: 'rgba(255,255,255,0.45)' }}>{outcomeLabel}</span>
                 <span className="tabular-nums font-semibold" style={{ color }}>
                   {pct.toFixed(0)}%
-                  <DeltaSubscript delta={meeting.probability_delta_1d?.[key]} color={color} />
+                  <DeltaSubscripts
+                    delta1d={meeting.probability_delta_1d?.[key]}
+                    delta1w={meeting.probability_delta_1w?.[key]}
+                    color={color}
+                  />
                 </span>
               </div>
               <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
@@ -162,13 +179,15 @@ function MeetingComparisonGrid({ outlook }: { outlook: MeetingOutlook[] }) {
 
 function ProbabilityBars({
   probabilities,
-  deltas,
+  deltas1d,
+  deltas1w,
   source,
   note,
   polymarketUrl,
 }: {
   probabilities: Record<string, number>
-  deltas?: Record<string, number>
+  deltas1d?: Record<string, number>
+  deltas1w?: Record<string, number>
   source: string
   note: string
   polymarketUrl?: string | null
@@ -188,7 +207,11 @@ function ProbabilityBars({
                 <span style={{ color: 'rgba(255,255,255,0.55)' }}>{label}</span>
                 <span style={{ color }}>
                   {pct.toFixed(0)}%
-                  <DeltaSubscript delta={deltas?.[key]} color={color} />
+                  <DeltaSubscripts
+                    delta1d={deltas1d?.[key]}
+                    delta1w={deltas1w?.[key]}
+                    color={color}
+                  />
                 </span>
               </div>
               <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
@@ -329,7 +352,8 @@ export default function FomcPanel() {
 
         <ProbabilityBars
           probabilities={data.probabilities}
-          deltas={data.probability_delta_1d}
+          deltas1d={data.probability_delta_1d}
+          deltas1w={data.probability_delta_1w}
           source={data.probability_source}
           note={data.probability_note}
           polymarketUrl={data.polymarket_url}

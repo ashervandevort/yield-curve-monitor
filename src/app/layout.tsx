@@ -74,7 +74,7 @@ export const metadata: Metadata = {
       'Live FRED Treasury curve, key spreads, macro calendar, regime labels, and Treasury futures DV01 hedge optimizer — free for rates desks.',
     images: [
       {
-        url: '/opengraph-image',
+        url: '/og-image.svg',
         width: 1200,
         height: 630,
         alt: 'Yield Curve Monitor — Treasury rates and DV01 hedging dashboard',
@@ -86,7 +86,7 @@ export const metadata: Metadata = {
     title: 'Yield Curve Monitor | Treasury Rates & DV01 Hedging',
     description:
       'Live Treasury curve, 2s10s spreads, FOMC/CPI calendar, and ZT–UB futures hedge sizing. Free at yield.252.capital',
-    images: ['/opengraph-image'],
+    images: ['/og-image.svg'],
     creator: '@252capital',
     site: '@252capital',
   },
