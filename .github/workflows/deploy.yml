@@ -13,7 +13,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Setup SSH key
       env:
@@ -77,7 +77,6 @@ jobs:
           --exclude='backend/venv' --exclude='backend/.pytest_cache' \
           --exclude='backend/app/data/*.sqlite' \
           --exclude='.env' --exclude='.env.local' --exclude='.env.production' \
-          -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
           ./ ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }}:/var/www/yield-curve_${{ env.DEPLOY_TIMESTAMP }}/
 
     - name: Finalize deployment
@@ -216,6 +215,8 @@ jobs:
         fi
 
         pm2 save --force
+
+        bash "$DEPLOY_PATH/backend/scripts/cron/install_crontab.sh" || echo "WARN: crontab install skipped"
 
         cd "$RELEASES_PATH"
         ls -1td yield-curve_* 2>/dev/null | tail -n +$(($KEEP_RELEASES + 1)) | while read OLD; do

@@ -5,7 +5,7 @@
 - [x] GitHub secrets (HOSTINGER_*, SSH_*, FRED_API_KEY)
 - [x] DNS + SSL + PM2 on 3059 / 8059
 - [ ] GitHub secrets: **DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD** (same as Market Color)
-- [ ] VPS cron: `backend/scripts/cron/fred_daily.py` (weekdays 23:00 UTC)
+- [x] VPS cron: `backend/scripts/cron/install_crontab.sh` (weekdays 23:00–23:45 UTC, auto on deploy)
 - [ ] One-time: `python backend/scripts/migrate_sqlite_to_pg.py` (optional, if SQLite has history)
 
 ## Storage

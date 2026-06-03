@@ -10,7 +10,9 @@ Full 730-day FRED backfill (one-off):
   MACRO_FULL_BACKFILL=1 python scripts/cron/macro_daily.py
 
 Cron (deploy252):
-  15 23 * * 1-5  cd /var/www/yield-curve/backend && ./venv/bin/python scripts/cron/macro_daily.py >> /var/log/yield-curve-macro.log 2>&1
+Cron (deploy252 — installed via scripts/cron/install_crontab.sh on deploy):
+  15 23 * * 1-5  → macro_daily.py
+  Logs: ~/logs/yield-curve/macro.log
 """
 from __future__ import annotations
 

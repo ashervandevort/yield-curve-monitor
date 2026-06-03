@@ -1,7 +1,8 @@
 """FOMC + Polymarket + futures cron jobs.
 
-Cron (deploy252 — Polymarket odds, after FRED/futures):
-  45 23 * * 1-5  cd /var/www/yield-curve/backend && ./venv/bin/python scripts/cron/fomc_daily.py >> /var/log/yield-curve-fomc.log 2>&1
+Cron (deploy252 — installed via scripts/cron/install_crontab.sh on deploy):
+  45 23 * * 1-5  → fomc_daily.py
+  Logs: ~/logs/yield-curve/fomc.log
 """
 from __future__ import annotations
 
