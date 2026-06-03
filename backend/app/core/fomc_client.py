@@ -1,9 +1,12 @@
 """FOMC meeting schedule, Polymarket odds, and FRED policy rate context."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
+
+import httpx
 
 from .config import settings
 from .fomc_store import fomc_store
@@ -57,30 +60,34 @@ async def _fred_latest(series_id: str) -> Optional[float]:
         return None
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    try:
-        df = await fred_client.fetch_series(series_id, start, end)
-        if df.empty:
+    for attempt in range(3):
+        try:
+            df = await fred_client.fetch_series(series_id, start, end)
+            if df.empty:
+                return None
+            val = df.iloc[-1]['value']
+            if val is None or (isinstance(val, float) and val != val):
+                return None
+            return float(val)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429 and attempt < 2:
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
             return None
-        val = df.iloc[-1]['value']
-        if val is None or (isinstance(val, float) and val != val):
+        except Exception:
             return None
-        return float(val)
-    except Exception:
-        return None
-
-
-async def fetch_target_range() -> dict[str, Optional[float]]:
-    lower = await _fred_latest('DFEDTARL')
-    upper = await _fred_latest('DFEDTARU')
-    midpoint = None
-    if lower is not None and upper is not None:
-        midpoint = round((lower + upper) / 2, 4)
-    return {'lower': lower, 'upper': upper, 'midpoint': midpoint}
+    return None
 
 
 async def fetch_policy_rates() -> tuple[dict[str, Optional[float]], Optional[float]]:
-    target = await fetch_target_range()
+    lower = await _fred_latest('DFEDTARL')
+    await asyncio.sleep(0.3)
+    upper = await _fred_latest('DFEDTARU')
+    await asyncio.sleep(0.3)
     effective = await _fred_latest('DFF')
+    target = {'lower': lower, 'upper': upper, 'midpoint': None}
+    if lower is not None and upper is not None:
+        target['midpoint'] = round((lower + upper) / 2, 4)
     return target, effective
 
 
