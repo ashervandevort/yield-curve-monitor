@@ -270,6 +270,7 @@ export interface MacroRelease {
   category: string
   date: string
   days_from_today: number
+  days_until_release?: number
   day_of_week?: string
   release_time_et?: string
   release_time_label?: string

@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 
 interface MeetingOutlook {
@@ -59,7 +59,66 @@ function formatMeetingLabel(iso: string) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function MeetingComparisonMatrix({ outlook }: { outlook: MeetingOutlook[] }) {
+function MeetingOutlookCard({ meeting }: { meeting: MeetingOutlook }) {
+  const label = formatMeetingLabel(meeting.meeting_date)
+  if (meeting.unavailable) {
+    return (
+      <div className="rounded border p-3" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
+        <div className="font-mono text-[10px] font-semibold mb-1" style={{ color: '#00cccc' }}>{label}</div>
+        <p className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.35)' }}>Market not matched</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded border p-3" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div>
+          <div className="font-mono text-[10px] font-semibold" style={{ color: '#00cccc' }}>{label}</div>
+          {meeting.title && (
+            <div className="font-mono text-[8px] mt-0.5 truncate max-w-[140px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              {meeting.title}
+            </div>
+          )}
+        </div>
+        {meeting.polymarket_url && (
+          <a
+            href={meeting.polymarket_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[8px] shrink-0 hover:underline"
+            style={{ color: 'rgba(255,255,255,0.35)' }}
+          >
+            ↗
+          </a>
+        )}
+      </div>
+      <div className="space-y-2">
+        {OUTCOME_ROWS.map(({ key, label: outcomeLabel, color }) => {
+          const pct = (meeting.probabilities[key] ?? 0) * 100
+          return (
+            <div key={key}>
+              <div className="flex justify-between font-mono text-[9px] mb-0.5">
+                <span style={{ color: 'rgba(255,255,255,0.45)' }}>{outcomeLabel}</span>
+                <span className="tabular-nums font-semibold" style={{ color }}>{pct.toFixed(0)}%</span>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pct}%` }}
+                  className="h-full rounded-full"
+                  style={{ background: color, opacity: 0.85 }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function MeetingComparisonGrid({ outlook }: { outlook: MeetingOutlook[] }) {
   const meetings = outlook.filter((m) => !m.unavailable).slice(0, 4)
   if (meetings.length === 0) return null
 
@@ -67,60 +126,13 @@ function MeetingComparisonMatrix({ outlook }: { outlook: MeetingOutlook[] }) {
     <div className="panel">
       <div className="panel-header flex-col sm:flex-row gap-1">
         <span className="panel-title">Cross-Meeting Outlook</span>
-        <span className="panel-subtitle">Polymarket implied probabilities · comparable across dates</span>
+        <span className="panel-subtitle">Polymarket odds by meeting · same scale as next-meeting panel</span>
       </div>
-      <div className="panel-body-sm overflow-x-auto">
-        <div className="min-w-[420px]">
-          <div
-            className="grid gap-x-3 gap-y-2 items-end"
-            style={{ gridTemplateColumns: `88px repeat(${meetings.length}, minmax(72px, 1fr))` }}
-          >
-            <div />
-            {meetings.map((m) => (
-              <div key={m.meeting_date} className="text-center">
-                <div className="font-mono text-[10px] font-semibold" style={{ color: '#00cccc' }}>
-                  {formatMeetingLabel(m.meeting_date)}
-                </div>
-                {m.polymarket_url && (
-                  <a
-                    href={m.polymarket_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-[8px] hover:underline"
-                    style={{ color: 'rgba(255,255,255,0.35)' }}
-                  >
-                    Polymarket ↗
-                  </a>
-                )}
-              </div>
-            ))}
-
-            {OUTCOME_ROWS.map(({ key, label, color }) => (
-              <Fragment key={key}>
-                <div className="font-mono text-[9px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                  {label}
-                </div>
-                {meetings.map((m) => {
-                  const pct = (m.probabilities[key] ?? 0) * 100
-                  return (
-                    <div key={`${m.meeting_date}-${key}`} className="flex flex-col gap-0.5">
-                      <div className="font-mono text-[9px] text-right tabular-nums" style={{ color }}>
-                        {pct.toFixed(0)}%
-                      </div>
-                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.min(100, pct)}%` }}
-                          className="h-full rounded-full"
-                          style={{ background: color, opacity: 0.85 }}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </Fragment>
-            ))}
-          </div>
+      <div className="panel-body-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {meetings.map((m) => (
+            <MeetingOutlookCard key={m.meeting_date} meeting={m} />
+          ))}
         </div>
       </div>
     </div>
@@ -246,7 +258,7 @@ export default function FomcPanel() {
         <div className="panel-header flex-col sm:flex-row gap-2">
           <span className="panel-title">Next FOMC Decision</span>
           <span className="panel-subtitle">
-            {data.next_meeting.day_of_week} {data.next_meeting.date} · 2:00 PM ET
+            {data.next_meeting.day_of_week} {data.next_meeting.date} · 2:00 PM ET · {countdown.days}d to decision
           </span>
         </div>
         <div className="panel-body flex flex-col items-center py-6">
@@ -297,7 +309,7 @@ export default function FomcPanel() {
         />
       </div>
 
-      {outlook.length > 0 && <MeetingComparisonMatrix outlook={outlook} />}
+      {outlook.length > 0 && <MeetingComparisonGrid outlook={outlook} />}
     </div>
   )
 }

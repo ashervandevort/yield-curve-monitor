@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Daily Treasury futures pull from Yahoo Finance."""
+"""Daily Treasury futures pull from Yahoo Finance.
+
+Cron (deploy252, after US cash close — 23:30 UTC ≈ 6:30 PM ET):
+  30 23 * * 1-5  cd /var/www/yield-curve/backend && ./venv/bin/python scripts/cron/futures_daily.py >> /var/log/yield-curve-futures.log 2>&1
+"""
 from __future__ import annotations
 
 import sys

@@ -24,6 +24,7 @@ const MARKET_STYLE = MACRO_MARKET_STYLE
 
 interface CalendarEvent extends MacroRelease {
   release_key?: string
+  days_until_release?: number
 }
 
 function filterByWindow(releases: MacroRelease[], pastDays: number, futureDays: number): MacroRelease[] {
@@ -44,7 +45,10 @@ function toDisplayEvents(events: CalendarEvent[] | undefined): MacroRelease[] {
   today.setHours(0, 0, 0, 0)
   return (events ?? []).map((e) => {
     const d = new Date(e.date + 'T12:00:00')
-    const diff = Math.round((d.getTime() - today.getTime()) / 86400000)
+    const diff =
+      typeof e.days_until_release === 'number'
+        ? e.days_until_release
+        : Math.round((d.getTime() - today.getTime()) / 86400000)
     const dayOfWeek =
       e.day_of_week ??
       d.toLocaleDateString('en-US', { weekday: 'short' })

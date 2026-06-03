@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import asyncio
 from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from .config import settings
 from .macro_store import macro_store
 from .market_calendar import market_by_date, market_days_in_range
+
+ET = ZoneInfo('America/New_York')
 
 MIN_RELEASE_GAP_DAYS = 7
 MACRO_SYNC_MAX_AGE_HOURS = settings.MACRO_SYNC_MAX_AGE_HOURS
@@ -77,6 +80,18 @@ def _weekday_label(d: date) -> str:
     return d.strftime('%a')
 
 
+def _days_until_release(date_str: str, time_et: str) -> int:
+    """Whole days until release moment (matches FOMC countdown day floor)."""
+    hour, minute = map(int, time_et.split(':'))
+    d = _parse_date(date_str)
+    release = datetime(d.year, d.month, d.day, hour, minute, tzinfo=ET)
+    now = datetime.now(ET)
+    remaining = (release - now).total_seconds()
+    if remaining <= 0:
+        return 0
+    return int(remaining // 86400)
+
+
 def _event_fields(release_key: str, meta: dict[str, Any], date_str: str, source: str) -> dict[str, Any]:
     d = _parse_date(date_str)
     time_et = meta.get('release_time_et', '08:30')
@@ -90,6 +105,7 @@ def _event_fields(release_key: str, meta: dict[str, Any], date_str: str, source:
         'day_of_week': _weekday_label(d),
         'release_time_et': time_et,
         'release_time_label': _format_time_et(time_et),
+        'days_until_release': _days_until_release(date_str, time_et),
     }
 
 

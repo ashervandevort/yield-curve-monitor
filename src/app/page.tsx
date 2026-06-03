@@ -398,7 +398,10 @@ export default function Home() {
                                   )}
                                 </span>
                                 <span className="font-mono font-semibold text-sm shrink-0" style={{ color: '#00cccc' }}>
-                                  {latestCurve.yields[row.tenor]?.toFixed(3) ?? '—'}%
+                                  {(curveType === 'futures'
+                                    ? latestCurve.yields[row.symbol]
+                                    : latestCurve.yields[row.tenor]
+                                  )?.toFixed(3) ?? '—'}%
                                 </span>
                               </div>
                             ))}

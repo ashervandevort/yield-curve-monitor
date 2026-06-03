@@ -84,7 +84,7 @@ export default function ChangeHeatmap({
           toDate: wd?.to_date ?? '',
           bins: columns.map(({ label, tenor }) => ({
             tenor: label,
-            value: wd?.changes[tenor] ?? null,
+            value: wd?.changes[curveType === 'futures' ? label : tenor] ?? null,
           })),
         }
       }),
