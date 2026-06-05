@@ -7,6 +7,7 @@ import pandas as pd
 
 from .config import settings
 from .curve_store import curve_store
+from .market_calendar import expected_latest_observation_date
 
 
 class FredClient:
@@ -26,10 +27,34 @@ class FredClient:
         except ValueError:
             return None
 
+    def _observation_behind_expected(self, curve_date: Optional[str]) -> bool:
+        if not curve_date:
+            return True
+        try:
+            obs = datetime.strptime(curve_date, '%Y-%m-%d').date()
+        except ValueError:
+            return True
+        return obs < expected_latest_observation_date()
+
     def _enrich_metadata(self, metadata: dict, curve_date: Optional[str]) -> dict:
         lag = self._observation_lag_days(curve_date)
-        enriched = {**metadata, 'observation_lag_days': lag}
+        expected = expected_latest_observation_date()
+        enriched = {
+            **metadata,
+            'observation_lag_days': lag,
+            'expected_observation_date': expected.isoformat(),
+        }
+        if curve_date:
+            try:
+                obs = datetime.strptime(curve_date, '%Y-%m-%d').date()
+                enriched['observation_stale'] = obs < expected
+            except ValueError:
+                enriched['observation_stale'] = True
+        else:
+            enriched['observation_stale'] = True
         if lag is not None and lag > 4:
+            enriched['stale'] = True
+        elif enriched.get('observation_stale'):
             enriched['stale'] = True
         return enriched
 
@@ -127,6 +152,9 @@ class FredClient:
     ) -> dict:
         """
         Fetch full yield curve for a specific date (concurrent requests).
+
+        Uses the latest date where **all** requested tenors have FRED observations
+        so the snapshot date matches a coherent close, not per-series max dates.
         """
         tenors = tenors or list(self.series_map.keys())
 
@@ -135,61 +163,101 @@ class FredClient:
             end = date
         else:
             end = datetime.now().strftime('%Y-%m-%d')
-            # 10-day window: handles weekends, holidays, and late FRED publications
-            start = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+            start = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
 
-        async def _fetch_one(tenor: str):
-            series_id = self.series_map.get(tenor)
-            if not series_id:
-                return tenor, None, None
-            for attempt in range(2):   # one retry on 429
-                try:
-                    df = await self.fetch_series(series_id, start, end)
-                    if not df.empty:
-                        latest = df.iloc[-1]
-                        return tenor, float(latest['value']), latest['date']
-                    return tenor, None, None
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 429 and attempt == 0:
-                        await asyncio.sleep(1.0)
-                        continue
-                    print(f"Error fetching {tenor} ({series_id}): {e}")
-                    return tenor, None, None
-                except Exception as e:
-                    print(f"Error fetching {tenor} ({series_id}): {e}")
-                    return tenor, None, None
-            return tenor, None, None
-
-        # Fetch all tenors concurrently (semaphore limits to 4 at a time to respect FRED rate limit)
         sem = asyncio.Semaphore(4)
 
-        async def _fetch_one_throttled(tenor: str):
+        async def _fetch_series_df(tenor: str) -> tuple[str, pd.DataFrame]:
+            series_id = self.series_map.get(tenor)
+            if not series_id:
+                return tenor, pd.DataFrame()
             async with sem:
-                return await _fetch_one(tenor)
+                for attempt in range(2):
+                    try:
+                        df = await self.fetch_series(series_id, start, end)
+                        return tenor, df
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 429 and attempt == 0:
+                            await asyncio.sleep(1.0)
+                            continue
+                        print(f"Error fetching {tenor} ({series_id}): {e}")
+                        return tenor, pd.DataFrame()
+                    except Exception as e:
+                        print(f"Error fetching {tenor} ({series_id}): {e}")
+                        return tenor, pd.DataFrame()
+            return tenor, pd.DataFrame()
 
-        tasks = [_fetch_one_throttled(t) for t in tenors]
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*[_fetch_series_df(t) for t in tenors])
 
-        yields: dict[str, float] = {}
-        latest_date = None
+        series_frames: dict[str, pd.Series] = {}
         missing_tenors: list[str] = []
-
-        for tenor, value, obs_date in results:
-            if value is not None and obs_date is not None:
-                yields[tenor] = value
-                if latest_date is None or obs_date > latest_date:
-                    latest_date = obs_date
-            else:
+        for tenor, df in results:
+            if df.empty:
                 missing_tenors.append(tenor)
+                continue
+            series_frames[tenor] = df.set_index('date')['value']
 
-        if latest_date and yields:
-            stored = curve_store.upsert_curve(latest_date.strftime('%Y-%m-%d'), yields)
-            fetched_at = stored.fetched_at
+        if not series_frames:
+            return {
+                'date': None,
+                'yields': {},
+                'metadata': self._enrich_metadata({
+                    'source': 'FRED',
+                    'fetched_at': None,
+                    'cache_status': 'miss',
+                    'missing_tenors': missing_tenors or tenors,
+                    'is_partial': True,
+                }, None),
+            }
+
+        merged = pd.DataFrame(series_frames).sort_index()
+        if date:
+            target = pd.Timestamp(date)
+            if target not in merged.index:
+                return {
+                    'date': None,
+                    'yields': {},
+                    'metadata': self._enrich_metadata({
+                        'source': 'FRED',
+                        'fetched_at': None,
+                        'cache_status': 'miss',
+                        'missing_tenors': tenors,
+                        'is_partial': True,
+                    }, None),
+                }
+            row = merged.loc[target]
+            curve_ts = target
         else:
-            fetched_at = None
+            complete = merged.dropna(how='any')
+            if complete.empty:
+                return {
+                    'date': None,
+                    'yields': {},
+                    'metadata': self._enrich_metadata({
+                        'source': 'FRED',
+                        'fetched_at': None,
+                        'cache_status': 'miss',
+                        'missing_tenors': missing_tenors,
+                        'is_partial': True,
+                    }, None),
+                }
+            row = complete.iloc[-1]
+            curve_ts = complete.index[-1]
+
+        yields = {
+            tenor: float(row[tenor])
+            for tenor in tenors
+            if tenor in row.index and pd.notna(row[tenor])
+        }
+        missing_tenors = [t for t in tenors if t not in yields]
+        curve_date = curve_ts.strftime('%Y-%m-%d')
+        fetched_at = None
+        if yields:
+            stored = curve_store.upsert_curve(curve_date, yields)
+            fetched_at = stored.fetched_at
 
         return {
-            'date': latest_date.strftime('%Y-%m-%d') if latest_date else None,
+            'date': curve_date,
             'yields': yields,
             'metadata': self._enrich_metadata({
                 'source': 'FRED',
@@ -197,7 +265,7 @@ class FredClient:
                 'cache_status': 'refreshed' if fetched_at else 'miss',
                 'missing_tenors': missing_tenors,
                 'is_partial': len(missing_tenors) > 0,
-            }, latest_date.strftime('%Y-%m-%d') if latest_date else None),
+            }, curve_date),
         }
 
     async def get_yield_curve(
@@ -216,8 +284,15 @@ class FredClient:
         cache_age = self._cache_age_hours(cached.fetched_at) if cached else None
         cache_fresh = cache_age is not None and cache_age <= settings.CURVE_CACHE_MAX_AGE_HOURS
         cache_complete = cached is not None and all(tenor in cached.yields for tenor in tenors)
+        observation_stale = self._observation_behind_expected(cached.date if cached else None)
 
-        if cached and cache_fresh and cache_complete and not refresh:
+        if (
+            cached
+            and cache_fresh
+            and cache_complete
+            and not refresh
+            and not observation_stale
+        ):
             missing = [tenor for tenor in tenors if tenor not in cached.yields]
             return {
                 'date': cached.date,
@@ -266,14 +341,17 @@ class FredClient:
         tenors: list[str],
         end_date: str,
     ) -> bool:
-        """True when cached rows include complete tenors through end_date (±3 days)."""
+        """True when cached rows include complete tenors through the expected latest obs."""
         if cached.empty or not all(tenor in cached.columns for tenor in tenors):
             return False
         complete = cached[tenors].dropna(how='any')
         if complete.empty:
             return False
-        end_ts = pd.Timestamp(end_date)
-        return complete.index.max() >= end_ts - pd.Timedelta(days=3)
+        expected_end = min(
+            pd.Timestamp(end_date),
+            pd.Timestamp(expected_latest_observation_date().isoformat()),
+        )
+        return complete.index.max() >= expected_end
 
     async def _fetch_fred_history_slice(
         self,

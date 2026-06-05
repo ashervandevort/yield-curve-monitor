@@ -1,8 +1,13 @@
 """US bond market holidays and early closes (SIFMA / NYSE-aligned rules)."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo('America/New_York')
+# FRED DGS series usually publish same-day after ~3:30 PM ET; cron runs ~5:30 PM ET.
+FRED_DGS_PUBLISH_CUTOFF_ET = (17, 15)
 
 
 def _easter_sunday(year: int) -> date:
@@ -138,3 +143,41 @@ def market_days_in_range(start: date, end: date) -> list[dict[str, Any]]:
 
 def market_by_date(start: date, end: date) -> dict[str, dict[str, Any]]:
     return {row['date']: row for row in market_days_in_range(start, end)}
+
+
+def is_bond_trading_day(d: date) -> bool:
+    """True on weekdays that are not full bond-market holidays."""
+    if d.weekday() >= 5:
+        return False
+    return d not in bond_market_holidays(d.year)
+
+
+def previous_bond_trading_day(d: date) -> date:
+    """Most recent bond trading day strictly before ``d``."""
+    cursor = d - timedelta(days=1)
+    while not is_bond_trading_day(cursor):
+        cursor -= timedelta(days=1)
+    return cursor
+
+
+def expected_latest_observation_date(
+    as_of: datetime | None = None,
+) -> date:
+    """
+    Latest FRED DGS observation date we should already have stored.
+
+    Before the publish cutoff on a trading day, expect prior session's close.
+    After cutoff (and on weekends/holidays), expect the most recent session.
+    """
+    et_now = (as_of or datetime.now(timezone.utc)).astimezone(ET)
+    today = et_now.date()
+
+    if is_bond_trading_day(today):
+        if (et_now.hour, et_now.minute) >= FRED_DGS_PUBLISH_CUTOFF_ET:
+            return today
+        return previous_bond_trading_day(today)
+
+    cursor = today
+    while not is_bond_trading_day(cursor):
+        cursor -= timedelta(days=1)
+    return cursor

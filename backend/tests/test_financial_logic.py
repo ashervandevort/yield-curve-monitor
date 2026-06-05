@@ -61,6 +61,19 @@ class CurveStoreTests(unittest.TestCase):
             store.upsert_curve("2026-05-12", {"2Y": 4.30})
             self.assertEqual(store.max_stored_date(), "2026-05-12")
 
+    def test_latest_complete_curve_requires_all_tenors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = CurveStore(str(Path(tmpdir) / "curves.sqlite"))
+            store.upsert_curve("2026-06-03", {"2Y": 4.08, "10Y": 4.49})
+            store.upsert_curve("2026-06-04", {"2Y": 4.10})
+            complete = store.latest_complete_curve(["2Y", "10Y"])
+            self.assertIsNotNone(complete)
+            assert complete is not None
+            self.assertEqual(complete.date, "2026-06-03")
+            latest = store.latest_curve(["2Y", "10Y"])
+            assert latest is not None
+            self.assertEqual(latest.date, "2026-06-03")
+
 
 # ── HedgingOptimizer (7-tenor) ────────────────────────────────────────────────
 
@@ -310,6 +323,40 @@ class TestMarketCalendar(unittest.TestCase):
         m = market_by_date(date(2026, 5, 30), date(2026, 6, 1))
         self.assertEqual(m['2026-05-30']['day_type'], 'weekend')
         self.assertEqual(m['2026-05-31']['day_type'], 'weekend')
+
+    def test_expected_observation_before_close_is_prior_session(self) -> None:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        from app.core.market_calendar import expected_latest_observation_date
+
+        # Thu Jun 4 2026, 2 PM ET → expect Wed Jun 3 close
+        as_of = datetime(2026, 6, 4, 18, 0, tzinfo=timezone.utc)  # 2 PM ET
+        self.assertEqual(
+            expected_latest_observation_date(as_of),
+            datetime(2026, 6, 3).date(),
+        )
+
+    def test_expected_observation_after_close_is_same_day(self) -> None:
+        from datetime import datetime, timezone
+        from app.core.market_calendar import expected_latest_observation_date
+
+        # Thu Jun 4 2026, 6 PM ET → expect Thu Jun 4 close
+        as_of = datetime(2026, 6, 4, 22, 30, tzinfo=timezone.utc)
+        self.assertEqual(
+            expected_latest_observation_date(as_of),
+            datetime(2026, 6, 4).date(),
+        )
+
+    def test_expected_observation_on_weekend_is_friday(self) -> None:
+        from datetime import datetime, timezone
+        from app.core.market_calendar import expected_latest_observation_date
+
+        # Sat Jun 6 2026 noon ET
+        as_of = datetime(2026, 6, 6, 16, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            expected_latest_observation_date(as_of),
+            datetime(2026, 6, 5).date(),
+        )
 
 
 class TestMacroStore(unittest.TestCase):

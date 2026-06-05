@@ -52,6 +52,8 @@ export interface CurveMetadata {
   is_partial: boolean
   stale?: boolean
   observation_lag_days?: number
+  expected_observation_date?: string
+  observation_stale?: boolean
 }
 
 export interface HistoricalPoint {

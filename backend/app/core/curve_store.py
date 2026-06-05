@@ -83,14 +83,60 @@ class CurveStore:
             )
         return StoredCurve(date=date, yields=yields, source=source, fetched_at=fetched_at)
 
+    def latest_complete_curve(self, tenors: Iterable[str]) -> StoredCurve | None:
+        """Latest date where every requested tenor has a stored observation."""
+        tenor_list = list(tenors)
+        if not tenor_list:
+            return None
+
+        placeholders = ",".join("?" for _ in tenor_list)
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT date, MAX(fetched_at) AS fetched_at
+                FROM daily_curves
+                WHERE tenor IN ({placeholders})
+                GROUP BY date
+                HAVING COUNT(DISTINCT tenor) = ?
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                [*tenor_list, len(tenor_list)],
+            ).fetchone()
+            if not row:
+                return None
+
+            date_str = str(row["date"])
+            rows = conn.execute(
+                f"""
+                SELECT tenor, yield_pct, source, fetched_at
+                FROM daily_curves
+                WHERE date = ? AND tenor IN ({placeholders})
+                """,
+                [date_str, *tenor_list],
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        yields = {row["tenor"]: float(row["yield_pct"]) for row in rows}
+        return StoredCurve(
+            date=date_str,
+            yields=yields,
+            source=rows[0]["source"],
+            fetched_at=max(row["fetched_at"] for row in rows),
+        )
+
     def latest_curve(self, tenors: Iterable[str]) -> StoredCurve | None:
         """
-        Return the most recent available value for each requested tenor.
+        Return the latest **complete** curve for all requested tenors.
 
-        Critically, each tenor is looked up independently (MAX(date) per tenor)
-        so that a single series having a newer publication date does NOT cause
-        all other tenors to appear missing.
+        Falls back to per-tenor max dates only when no complete snapshot exists.
         """
+        complete = self.latest_complete_curve(tenors)
+        if complete:
+            return complete
+
         tenor_list = list(tenors)
         if not tenor_list:
             return None

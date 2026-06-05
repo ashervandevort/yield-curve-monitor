@@ -89,7 +89,52 @@ class PostgresCurveStore:
             fetched_at=fetched_at.isoformat(),
         )
 
+    def latest_complete_curve(self, tenors: Iterable[str]) -> StoredCurve | None:
+        tenor_list = list(tenors)
+        if not tenor_list:
+            return None
+        self._ensure_db()
+        with self._connect() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    f"""
+                    SELECT date, MAX(fetched_at) AS fetched_at
+                    FROM {self.SCHEMA}.daily_curves
+                    WHERE tenor = ANY(%s)
+                    GROUP BY date
+                    HAVING COUNT(DISTINCT tenor) = %s
+                    ORDER BY date DESC
+                    LIMIT 1
+                    """,
+                    (tenor_list, len(tenor_list)),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                date_str = row["date"].strftime("%Y-%m-%d") if hasattr(row["date"], "strftime") else str(row["date"])
+                cur.execute(
+                    f"""
+                    SELECT tenor, yield_pct, source, fetched_at
+                    FROM {self.SCHEMA}.daily_curves
+                    WHERE date = %s AND tenor = ANY(%s)
+                    """,
+                    (date_str, tenor_list),
+                )
+                rows = cur.fetchall()
+        if not rows:
+            return None
+        yields = {row["tenor"]: float(row["yield_pct"]) for row in rows}
+        return StoredCurve(
+            date=date_str,
+            yields=yields,
+            source=rows[0]["source"],
+            fetched_at=max(row["fetched_at"].isoformat() for row in rows),
+        )
+
     def latest_curve(self, tenors: Iterable[str]) -> StoredCurve | None:
+        complete = self.latest_complete_curve(tenors)
+        if complete:
+            return complete
         tenor_list = list(tenors)
         if not tenor_list:
             return None

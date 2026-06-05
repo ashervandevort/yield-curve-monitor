@@ -33,7 +33,16 @@ function formatTime(date: Date) {
   })
 }
 
-function curveDateHint(metadata?: CurveMetadata | null): string | null {
+function curveDateHint(
+  metadata?: CurveMetadata | null,
+  curveDate?: string | null,
+): string | null {
+  if (metadata?.observation_stale && metadata?.expected_observation_date) {
+    if (curveDate && curveDate < metadata.expected_observation_date) {
+      return `expected close ${metadata.expected_observation_date} — syncing from FRED`
+    }
+    return `expected close ${metadata.expected_observation_date} — syncing from FRED`
+  }
   const lag = metadata?.observation_lag_days
   if (lag == null || lag <= 4) return null
   return `${lag}d behind today — run curve sync or hit refresh with backend up`
@@ -53,12 +62,12 @@ export default function StatusBar({
       ? 'offline'
       : backendStatus === 'checking'
         ? 'checking'
-        : curveMetadata?.stale || curveMetadata?.is_partial
+        : curveMetadata?.stale || curveMetadata?.is_partial || curveMetadata?.observation_stale
           ? 'stale'
           : 'live'
 
   const cfg = STATUS_CONFIG[dataStatus]
-  const staleHint = curveDateHint(curveMetadata)
+  const staleHint = curveDateHint(curveMetadata, curveDate)
 
   return (
     <div
