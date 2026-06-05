@@ -89,6 +89,31 @@ class PostgresCurveStore:
             fetched_at=fetched_at.isoformat(),
         )
 
+    def delete_curve_rows(self, date: str, tenors: Iterable[str] | None = None) -> int:
+        """Remove stored rows for a session date (optional tenor subset)."""
+        self._ensure_db()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if tenors is None:
+                    cur.execute(
+                        f"DELETE FROM {self.SCHEMA}.daily_curves WHERE date = %s",
+                        (date,),
+                    )
+                else:
+                    tenor_list = list(tenors)
+                    if not tenor_list:
+                        return 0
+                    cur.execute(
+                        f"""
+                        DELETE FROM {self.SCHEMA}.daily_curves
+                        WHERE date = %s AND tenor = ANY(%s)
+                        """,
+                        (date, tenor_list),
+                    )
+                deleted = cur.rowcount
+            conn.commit()
+        return int(deleted)
+
     def latest_complete_curve(self, tenors: Iterable[str]) -> StoredCurve | None:
         tenor_list = list(tenors)
         if not tenor_list:

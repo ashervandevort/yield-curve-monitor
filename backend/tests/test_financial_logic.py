@@ -74,6 +74,14 @@ class CurveStoreTests(unittest.TestCase):
             assert latest is not None
             self.assertEqual(latest.date, "2026-06-03")
 
+    def test_delete_curve_rows_removes_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = CurveStore(str(Path(tmpdir) / "curves.sqlite"))
+            store.upsert_curve("2026-06-03", {"2Y": 4.08, "10Y": 4.49})
+            deleted = store.delete_curve_rows("2026-06-03", ["2Y", "10Y"])
+            self.assertEqual(deleted, 2)
+            self.assertIsNone(store.latest_curve(["2Y", "10Y"]))
+
 
 # ── HedgingOptimizer (7-tenor) ────────────────────────────────────────────────
 
@@ -253,6 +261,54 @@ class AnalyticsTests(unittest.TestCase):
                     tenor, shocks,
                     f"Scenario '{name}' missing tenor '{tenor}'",
                 )
+
+
+class TestFredRepair(unittest.IsolatedAsyncioTestCase):
+    async def test_repair_rewrites_complete_sessions_and_drops_partials(self) -> None:
+        import pandas as pd
+        from unittest.mock import AsyncMock, patch
+
+        from app.core.fred_client import FredClient
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = CurveStore(str(Path(tmpdir) / "curves.sqlite"))
+            store.upsert_curve("2026-06-03", {"2Y": 4.08, "10Y": 4.49})
+            # Mis-stamped tail: 2Y value from prior session on June 4
+            store.upsert_curve("2026-06-04", {"2Y": 4.08, "10Y": 4.51})
+            store.upsert_curve("2026-06-05", {"2Y": 4.09})
+
+            merged = pd.DataFrame(
+                {
+                    "2Y": [4.08, 4.10],
+                    "10Y": [4.49, 4.51],
+                },
+                index=pd.to_datetime(["2026-06-03", "2026-06-04"]),
+            )
+
+            client = FredClient()
+            with patch("app.core.fred_client.curve_store", store):
+                with patch.object(
+                    client,
+                    "_fetch_merged_series",
+                    AsyncMock(return_value=merged),
+                ):
+                    with patch.object(
+                        client,
+                        "get_yield_curve",
+                        AsyncMock(return_value={"date": "2026-06-04", "yields": {"2Y": 4.10, "10Y": 4.51}}),
+                    ):
+                        result = await client.repair_recent_curves(
+                            days=30,
+                            tenors=["2Y", "10Y"],
+                        )
+
+            self.assertEqual(result["complete_sessions_rewritten"], 2)
+            self.assertGreaterEqual(result["rows_deleted"], 2)
+            history = store.curve_history("2026-06-03", "2026-06-04", ["2Y", "10Y"])
+            self.assertEqual(len(history), 2)
+            self.assertAlmostEqual(float(history.loc["2026-06-04", "2Y"]), 4.10)
+            partial = store.curve_history("2026-06-05", "2026-06-05", ["2Y", "10Y"])
+            self.assertTrue(partial.empty)
 
 
 class TestMacroCalendarHelpers(unittest.TestCase):

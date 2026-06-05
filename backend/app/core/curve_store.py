@@ -83,6 +83,22 @@ class CurveStore:
             )
         return StoredCurve(date=date, yields=yields, source=source, fetched_at=fetched_at)
 
+    def delete_curve_rows(self, date: str, tenors: Iterable[str] | None = None) -> int:
+        """Remove stored rows for a session date (optional tenor subset)."""
+        with self._connect() as conn:
+            if tenors is None:
+                cur = conn.execute("DELETE FROM daily_curves WHERE date = ?", (date,))
+            else:
+                tenor_list = list(tenors)
+                if not tenor_list:
+                    return 0
+                placeholders = ",".join("?" for _ in tenor_list)
+                cur = conn.execute(
+                    f"DELETE FROM daily_curves WHERE date = ? AND tenor IN ({placeholders})",
+                    [date, *tenor_list],
+                )
+        return int(cur.rowcount)
+
     def latest_complete_curve(self, tenors: Iterable[str]) -> StoredCurve | None:
         """Latest date where every requested tenor has a stored observation."""
         tenor_list = list(tenors)

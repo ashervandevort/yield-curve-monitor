@@ -353,6 +353,30 @@ class FredClient:
         )
         return complete.index.max() >= expected_end
 
+    async def _fetch_merged_series(
+        self,
+        start_date: str,
+        end_date: str,
+        tenors: list[str],
+    ) -> pd.DataFrame:
+        """Fetch FRED series and return a date-indexed tenor matrix (may include NaNs)."""
+        all_data: dict[str, pd.Series] = {}
+
+        for tenor in tenors:
+            series_id = self.series_map.get(tenor)
+            if not series_id:
+                continue
+            try:
+                df = await self.fetch_series(series_id, start_date, end_date)
+                if not df.empty:
+                    all_data[tenor] = df.set_index('date')['value']
+            except Exception as e:
+                print(f"Error fetching {tenor}: {e}")
+
+        if not all_data:
+            return pd.DataFrame()
+        return pd.DataFrame(all_data).sort_index()
+
     async def _fetch_fred_history_slice(
         self,
         fetch_start: str,
@@ -360,26 +384,10 @@ class FredClient:
         tenors: list[str],
     ) -> pd.DataFrame:
         """Pull one date slice from FRED and upsert into local storage."""
-        all_data: dict[str, pd.Series] = {}
+        result = await self._fetch_merged_series(fetch_start, end_date, tenors)
+        if result.empty:
+            return result
 
-        for tenor in tenors:
-            series_id = self.series_map.get(tenor)
-            if not series_id:
-                continue
-
-            try:
-                df = await self.fetch_series(series_id, fetch_start, end_date)
-                if not df.empty:
-                    df = df.set_index('date')
-                    all_data[tenor] = df['value']
-            except Exception as e:
-                print(f"Error fetching {tenor}: {e}")
-                continue
-
-        if not all_data:
-            return pd.DataFrame()
-
-        result = pd.DataFrame(all_data).sort_index()
         for date, row in result.iterrows():
             yields = {
                 tenor: float(value)
@@ -390,6 +398,74 @@ class FredClient:
                 curve_store.upsert_curve(date.strftime('%Y-%m-%d'), yields)
 
         return result
+
+    async def repair_recent_curves(
+        self,
+        days: int = 90,
+        tenors: Optional[list[str]] = None,
+    ) -> dict:
+        """
+        One-time tail repair: re-fetch recent FRED history and rewrite only
+        **complete** multi-tenor sessions (delete-then-upsert per date).
+
+        Removes partial/mis-stamped rows in the repair window that do not
+        correspond to a full FRED close. Does not touch dates outside the window.
+        """
+        tenors = tenors or list(settings.FULL_TENORS)
+        days = max(30, min(int(days), 730))
+        end = datetime.now().strftime('%Y-%m-%d')
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+        merged = await self._fetch_merged_series(start, end, tenors)
+        if merged.empty:
+            return {
+                'start': start,
+                'end': end,
+                'days_requested': days,
+                'complete_sessions_rewritten': 0,
+                'rows_deleted': 0,
+                'partial_dates_removed': 0,
+                'latest_date': None,
+            }
+
+        available = [t for t in tenors if t in merged.columns]
+        complete = merged[available].dropna(how='any')
+        complete_dates = {ts.strftime('%Y-%m-%d') for ts in complete.index}
+
+        rows_deleted = 0
+        rewritten = 0
+
+        for ts, row in complete.iterrows():
+            date_str = ts.strftime('%Y-%m-%d')
+            yields = {tenor: float(row[tenor]) for tenor in available}
+            rows_deleted += curve_store.delete_curve_rows(date_str, available)
+            curve_store.upsert_curve(date_str, yields)
+            rewritten += 1
+
+        partial_removed = 0
+        stored = curve_store.curve_history(start, end, available)
+        if not stored.empty:
+            for ts in stored.index:
+                date_str = ts.strftime('%Y-%m-%d')
+                if date_str in complete_dates:
+                    continue
+                deleted = curve_store.delete_curve_rows(date_str, available)
+                if deleted:
+                    partial_removed += 1
+                    rows_deleted += deleted
+
+        latest = await self.get_yield_curve(tenors=available, refresh=True)
+
+        return {
+            'start': start,
+            'end': end,
+            'days_requested': days,
+            'complete_sessions_rewritten': rewritten,
+            'rows_deleted': rows_deleted,
+            'partial_dates_removed': partial_removed,
+            'latest_date': latest.get('date'),
+            'tenors': available,
+        }
 
     async def fetch_curve_history(
         self,
