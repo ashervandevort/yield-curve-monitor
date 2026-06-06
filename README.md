@@ -140,29 +140,26 @@ Suitable for **risk sizing and hedge design**. Not a substitute for live broker 
 |--------|------------|-----------------|
 | `HOSTINGER_HOST` | VPS IP address | Hostinger panel → VPS → IP (same server as color.252.capital) |
 | `HOSTINGER_USER` | SSH login name | Usually **`deploy252`** on your 252 VPS |
-| `SSH_PRIVATE_KEY` | **Private** SSH key (full file) | See below — **not** your Hostinger panel password |
-| `SSH_PASSPHRASE` | Passphrase **for that SSH key** | Password you chose when creating the key (blank if none) |
+| `SSH_PRIVATE_KEY` | **Private** SSH key (full file, no passphrase) | `~/.ssh/github_deploy_dec2025` — same key as other 252 VPS deploys |
 | `FRED_API_KEY` | FRED API key | [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html) |
 
-#### SSH secrets — which is which?
+#### SSH secrets
 
-These are **not** your Hostinger hPanel login. They are for GitHub Actions to SSH into your VPS (same setup as `market-color` and other 252 projects).
+Use the **passphrase-free** deploy key (`github_deploy_dec2025`). The workflow runs SSH in `BatchMode` — a passphrase-protected key will fail even when TCP connects.
 
-1. **`SSH_PRIVATE_KEY`** — Paste the **entire private key file**, including `-----BEGIN ...-----` and `-----END ...-----` lines.  
-   On your Mac you likely have `~/.ssh/github_deploy_dec2025` (Dec 2025 deploy key). If `market-color` already deploys successfully, use the **same private key** you put in that repo’s secrets.
+```bash
+pbcopy < ~/.ssh/github_deploy_dec2025   # paste into GitHub secret SSH_PRIVATE_KEY
+```
 
-   ```bash
-   # Copy to clipboard (Mac) — paste into GitHub secret SSH_PRIVATE_KEY
-   pbcopy < ~/.ssh/github_deploy_dec2025
-   ```
+#### If deploy fails with port 22 timeout
 
-2. **`SSH_PASSPHRASE`** — The optional password you set when running `ssh-keygen`.  
-   - If you remember setting one for `github_deploy_dec2025`, use that.  
-   - If the key has **no** passphrase, create the secret with a single space or leave empty (some workflows accept empty; if deploy fails, try the passphrase from your password manager for “github deploy” or “vps ssh”).
+Failures are usually **TCP timeout from GitHub Actions → VPS**, not a bad key. Logs show `nc: connect … timed out` before any auth attempt.
 
-3. **Quick path:** Open GitHub → **market-color** repo → Settings → Secrets → Actions. You should see the same four infra secret **names**. Copy the **values** from wherever you stored them when you first set up market-color (GitHub won’t show them again — use your local key file + memory/1Password).
+1. **Hostinger hPanel** → VPS → **Firewall** — SSH (port 22) must allow **any IP**, not just your home IP. GitHub runner IPs change every run.
+2. **Re-run workflow** — the deploy job retries TCP+SSH up to 8 times with backoff; queued deploys (`concurrency`) avoid parallel SSH storms.
+3. **Durable fix (recommended):** install a [self-hosted GitHub Actions runner](https://docs.github.com/en/actions/hosting-your-own-runners) on the VPS so deploy runs locally with no inbound SSH from the cloud.
 
-**Do not** paste the `.pub` file — only the private key (no `.pub` extension).
+Successful runs log `Runner egress IP: …` — if timeouts persist, note that IP when opening a Hostinger support ticket.
 
 ### One-time VPS setup
 

@@ -5,64 +5,34 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# One deploy at a time — parallel pushes were opening many SSH sessions.
+concurrency:
+  group: yield-curve-deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       DEPLOY_TIMESTAMP: temp_${{ github.run_id }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      HOST: ${{ secrets.HOSTINGER_HOST }}
+      USER: ${{ secrets.HOSTINGER_USER }}
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
 
-    - name: Setup SSH key
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        HOST: ${{ secrets.HOSTINGER_HOST }}
-        USER: ${{ secrets.HOSTINGER_USER }}
-      run: |
-        set -e
-        mkdir -p ~/.ssh
-        chmod 700 ~/.ssh
-        # Write key exactly — avoids appleboy passphrase / formatting issues
-        printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
-        chmod 600 ~/.ssh/deploy_key
-
-        # Fail fast on malformed key (would show Permission denied, not timeout)
-        ssh-keygen -l -f ~/.ssh/deploy_key >/dev/null
-
-        ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-
-        echo "Preflight TCP to ${HOST}:22 ..."
-        if ! nc -zv -w 15 "$HOST" 22; then
-          echo "ERROR: Cannot reach ${HOST}:22 from GitHub runner (network/firewall)."
-          echo "This is NOT a key or passphrase issue — TCP never connected."
-          exit 1
-        fi
-
-        echo "Testing SSH auth (BatchMode, no passphrase prompt) ..."
-        for attempt in 1 2 3; do
-          if ssh -i ~/.ssh/deploy_key \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o ConnectTimeout=30 \
-            -o ServerAliveInterval=10 \
-            -o ServerAliveCountMax=3 \
-            "$USER@$HOST" 'echo SSH OK'; then
-            echo "SSH authenticated on attempt ${attempt}"
-            exit 0
-          fi
-          echo "SSH attempt ${attempt} failed — retrying in 15s ..."
-          sleep 15
-        done
-        echo "ERROR: TCP reached port 22 but SSH auth failed."
-        echo "Check SSH_PRIVATE_KEY matches ~/.ssh/github_deploy_dec2025 (no passphrase)."
-        exit 1
+    - name: Setup SSH key and verify connectivity
+      run: bash .github/scripts/setup_ssh.sh
 
     - name: Create temp directory on VPS
       run: |
-        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=30 \
-          ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }} << EOF
+        bash .github/scripts/ssh_retry.sh 4 "mkdir temp" \
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=45 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            "${USER}@${HOST}" << EOF
         DEPLOY_PATH="/var/www/yield-curve"
         TEMP_PATH="\${DEPLOY_PATH}_${{ env.DEPLOY_TIMESTAMP }}"
         echo "Starting Yield Curve deployment with ID ${{ env.DEPLOY_TIMESTAMP }}"
@@ -71,13 +41,14 @@ jobs:
 
     - name: Sync files
       run: |
-        rsync -avz --delete \
-          -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=30" \
-          --exclude='.git' --exclude='node_modules' --exclude='.next' \
-          --exclude='backend/venv' --exclude='backend/.pytest_cache' \
-          --exclude='backend/app/data/*.sqlite' \
-          --exclude='.env' --exclude='.env.local' --exclude='.env.production' \
-          ./ ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }}:/var/www/yield-curve_${{ env.DEPLOY_TIMESTAMP }}/
+        bash .github/scripts/ssh_retry.sh 4 "rsync" \
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=45 -o ServerAliveInterval=15 -o ServerAliveCountMax=6" \
+            --exclude='.git' --exclude='node_modules' --exclude='.next' \
+            --exclude='backend/venv' --exclude='backend/.pytest_cache' \
+            --exclude='backend/app/data/*.sqlite' \
+            --exclude='.env' --exclude='.env.local' --exclude='.env.production' \
+            ./ "${USER}@${HOST}:/var/www/yield-curve_${{ env.DEPLOY_TIMESTAMP }}/"
 
     - name: Finalize deployment
       env:
@@ -90,9 +61,11 @@ jobs:
         GITHUB_RUN_ID: ${{ github.run_id }}
         GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
       run: |
-        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o ConnectTimeout=30 \
-          ${{ secrets.HOSTINGER_USER }}@${{ secrets.HOSTINGER_HOST }} \
-          "FRED_API_KEY='$FRED_API_KEY' DB_HOST='$DB_HOST' DB_PORT='$DB_PORT' DB_NAME='$DB_NAME' DB_USER='$DB_USER' DB_PASSWORD='$DB_PASSWORD' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' DEPLOY_TIMESTAMP='${{ env.DEPLOY_TIMESTAMP }}' bash -s" << 'REMOTE'
+        bash .github/scripts/ssh_retry.sh 3 "finalize" \
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=45 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            "${USER}@${HOST}" \
+            "FRED_API_KEY='$FRED_API_KEY' DB_HOST='$DB_HOST' DB_PORT='$DB_PORT' DB_NAME='$DB_NAME' DB_USER='$DB_USER' DB_PASSWORD='$DB_PASSWORD' GITHUB_RUN_ID='$GITHUB_RUN_ID' GITHUB_RUN_ATTEMPT='$GITHUB_RUN_ATTEMPT' DEPLOY_TIMESTAMP='${{ env.DEPLOY_TIMESTAMP }}' bash -s" << 'REMOTE'
         set -e
 
         DEPLOY_PATH="/var/www/yield-curve"
@@ -125,7 +98,6 @@ jobs:
 
         PREVIOUS=$(readlink $DEPLOY_PATH || echo "")
 
-        # Carry forward SQLite cache from previous release for migration
         if [ -n "$PREVIOUS" ] && [ -f "$PREVIOUS/backend/app/data/yield_curve_cache.sqlite" ]; then
           mkdir -p "$NEW_RELEASE_PATH/backend/app/data"
           cp "$PREVIOUS/backend/app/data/yield_curve_cache.sqlite" \
