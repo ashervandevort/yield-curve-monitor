@@ -263,6 +263,73 @@ class AnalyticsTests(unittest.TestCase):
                 )
 
 
+class TestFredCatchup(unittest.IsolatedAsyncioTestCase):
+    async def test_catchup_skips_when_at_expected_close(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from app.core.fred_sync import run_fred_spot_sync, spot_sync_status
+
+        with patch(
+            "app.core.fred_sync.spot_sync_status",
+            return_value={
+                "stored_date": "2026-06-04",
+                "expected_date": "2026-06-04",
+                "behind_expected": False,
+                "tenors": ["2Y", "10Y"],
+            },
+        ):
+            with patch("app.core.fred_sync.fred_client.fetch_curve_history", AsyncMock()) as hist:
+                result = await run_fred_spot_sync(force=False)
+                hist.assert_not_called()
+
+        self.assertEqual(result["action"], "skipped")
+
+    async def test_catchup_syncs_when_behind_expected(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from app.core.fred_sync import run_fred_spot_sync
+
+        with patch(
+            "app.core.fred_sync.spot_sync_status",
+            return_value={
+                "stored_date": "2026-06-03",
+                "expected_date": "2026-06-04",
+                "behind_expected": True,
+                "tenors": ["2Y", "10Y"],
+            },
+        ):
+            with patch(
+                "app.core.fred_sync.resolve_fetch_window",
+                return_value=("2026-05-28", "2026-06-05", "incremental"),
+            ):
+                with patch(
+                    "app.core.fred_sync.get_curve_store",
+                ) as get_store:
+                    from unittest.mock import MagicMock
+
+                    store = MagicMock()
+                    store.row_count.side_effect = [100, 110]
+                    store.max_stored_date.side_effect = ["2026-06-03", "2026-06-04"]
+                    get_store.return_value = store
+                    with patch(
+                        "app.core.fred_sync.fred_client.fetch_curve_history",
+                        AsyncMock(return_value=__import__("pandas").DataFrame()),
+                    ):
+                        with patch(
+                            "app.core.fred_sync.fred_client.get_yield_curve",
+                            AsyncMock(return_value={"date": "2026-06-04", "yields": {"2Y": 4.1}}),
+                        ):
+                            with patch(
+                                "app.core.fred_sync.fred_client._observation_behind_expected",
+                                return_value=False,
+                            ):
+                                result = await run_fred_spot_sync(force=False)
+
+        self.assertEqual(result["action"], "synced")
+        self.assertEqual(result["latest_date"], "2026-06-04")
+        self.assertFalse(result["still_behind_expected"])
+
+
 class TestFredRepair(unittest.IsolatedAsyncioTestCase):
     async def test_repair_rewrites_complete_sessions_and_drops_partials(self) -> None:
         import pandas as pd

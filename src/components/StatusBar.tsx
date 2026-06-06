@@ -38,10 +38,7 @@ function curveDateHint(
   curveDate?: string | null,
 ): string | null {
   if (metadata?.observation_stale && metadata?.expected_observation_date) {
-    if (curveDate && curveDate < metadata.expected_observation_date) {
-      return `expected close ${metadata.expected_observation_date} — syncing from FRED`
-    }
-    return `expected close ${metadata.expected_observation_date} — syncing from FRED`
+    return `expected close ${metadata.expected_observation_date} — FRED catch-up retries overnight`
   }
   const lag = metadata?.observation_lag_days
   if (lag == null || lag <= 4) return null

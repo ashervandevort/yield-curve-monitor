@@ -11,14 +11,14 @@ Full 730-day backfill (migration only):
 
 Cron (deploy252 — installed via scripts/cron/install_crontab.sh on deploy):
   30 22 * * 1-5  → fred_daily.py   (~6:30 PM ET in EDT)
+  Staggered catch-up retries → fred_catchup.py (see install_crontab.sh)
   Logs: ~/logs/yield-curve/fred.log
 """
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -29,59 +29,23 @@ from dotenv import load_dotenv
 load_dotenv(BACKEND_ROOT / ".env")
 load_dotenv(BACKEND_ROOT.parent / ".env")
 
-from app.core.config import settings  # noqa: E402
-from app.core.fred_client import fred_client  # noqa: E402
-from app.core.curve_store import get_curve_store  # noqa: E402
-
-OVERLAP_DAYS = 5
-BOOTSTRAP_DAYS = 14
-FULL_BACKFILL_DAYS = 730
-
-
-def resolve_fetch_window(store) -> tuple[str, str, str]:
-    """Return (start, end, mode) for the incremental FRED pull."""
-    end = datetime.now().strftime("%Y-%m-%d")
-
-    if os.getenv("FRED_FULL_BACKFILL") == "1":
-        start = (datetime.now() - timedelta(days=FULL_BACKFILL_DAYS)).strftime("%Y-%m-%d")
-        return start, end, "full_backfill"
-
-    max_date = store.max_stored_date()
-    if max_date:
-        start = (
-            datetime.strptime(max_date, "%Y-%m-%d") - timedelta(days=OVERLAP_DAYS)
-        ).strftime("%Y-%m-%d")
-        return start, end, "incremental"
-
-    start = (datetime.now() - timedelta(days=BOOTSTRAP_DAYS)).strftime("%Y-%m-%d")
-    return start, end, "bootstrap"
+from app.core.fred_sync import run_fred_spot_sync  # noqa: E402
 
 
 async def run_daily_update() -> None:
     """Append recent curve history and refresh the latest snapshot."""
-    if not settings.FRED_API_KEY:
-        raise SystemExit("FRED_API_KEY not configured")
-
-    tenors = list(settings.FULL_TENORS)
-    store = get_curve_store()
-    start, end, mode = resolve_fetch_window(store)
-    rows_before = store.row_count()
-    max_before = store.max_stored_date()
-
+    print(f"[{datetime.now().isoformat()}] fred_daily (primary, force=True)")
+    result = await run_fred_spot_sync(force=True)
     print(
-        f"[{datetime.now().isoformat()}] {mode}: {len(tenors)} tenors, "
-        f"{start} → {end} (stored max: {max_before or 'none'})"
+        f"  {result['mode']}: {result.get('start')} → {result.get('end')} "
+        f"(stored max: {result.get('max_before') or 'none'})"
     )
-
-    history = await fred_client.fetch_curve_history(start, end, tenors)
-    print(f"  History rows in frame: {len(history)}")
-    print(f"  Store rows before: {rows_before}")
-
-    latest = await fred_client.get_yield_curve(tenors=tenors, refresh=True)
-    print(f"  Latest curve: {latest.get('date')} ({len(latest.get('yields', {}))} tenors)")
-
-    print(f"  Store rows after: {store.row_count()}")
-    print(f"  Stored max date: {store.max_stored_date()}")
+    print(f"  history rows in frame: {result.get('history_rows', 0)}")
+    print(f"  latest curve: {result.get('latest_date')} (expected {result['expected_date']})")
+    print(f"  store rows: {result.get('rows_before')} → {result.get('rows_after')}")
+    print(f"  stored max after: {result.get('max_after')}")
+    if result.get("still_behind_expected"):
+        print("  note: FRED not yet at expected close — fred_catchup will retry tonight/morning")
     print("Done.")
 
 
